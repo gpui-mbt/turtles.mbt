@@ -35,6 +35,8 @@ jobs:
         run: moon check --target native --deny-warn
       - name: Unit tests
         run: moon test --target native
+      - name: Offline verification-profile adversarial tests
+        run: python3 -m unittest discover -s scripts/tests -v
       - name: Run fixture baseline
         run: moon -C fixtures/basic test
       - name: Run isolation fixture baseline
