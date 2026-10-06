@@ -1,7 +1,12 @@
 # Open implementation tasks
 
-No open implementation tasks as of 2026-10-02. PRs #25, #26 and #27 have
-merged into `main`; their task records are archived in [`../closed/`](../closed/).
+- [Native process-tree timeout cleanup on Windows and Apple Silicon macOS](20261007-native-process-tree-timeout-cleanup.md)
+  — source finding; platform reproduction and implementation pending.
+
+Updated: 2026-10-07 (JST).
+
+PRs #25, #26 and #27 merged into `main`; their task records are archived in
+[`../closed/`](../closed/).
 
 Workflow:
 
