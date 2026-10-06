@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "profile": "moonbit-composition-helpers-v1",
+  "pilot_revision": "packaging-39b1275",
+  "target": "wasm",
+  "runtime_packages": ["text", "controls/text_field"],
+  "max_mutants": 64,
+  "timeout_seconds": 60,
+  "turtles_sha256": "REPLACE_WITH_REVIEWED_SCHEMA3_EXECUTABLE_SHA256"
+}

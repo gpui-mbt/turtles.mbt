@@ -245,7 +245,16 @@ Comments, strings, character literals, test files (`*_test.mbt`, `*_wbtest.mbt`)
 
 ## Development
 
-The CI is MoonBit-only:
+### Experimental proof companion
+
+An opt-in source-checkout companion combines source-exact helper mutation,
+independent model tests, the reviewed official MoonBit→Why3→Z3 export backend,
+and deterministic PBT regression/remutation replay. Its first profile covers
+only three GPUI range/Unicode helpers. It keeps runtime kills and actual proof
+counterexamples separate and does not change the native default command or
+existing reports. See [the bounded profile and its limitations](docs/moonbit-verification-profile.md).
+
+The native engine checks are:
 
 ```sh
 moon update
