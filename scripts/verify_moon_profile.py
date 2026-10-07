@@ -880,7 +880,7 @@ def regression_replay(candidate, row, source, campaign, moon, env, profile):
 
 
 def audit_turtles(report, helper, extracted, maximum):
-    if type(report) is not dict or type(report.get("schema")) is not int or report["schema"] != 3 or report.get("turtles_version") != "0.3.0" or report.get("module") != str(helper) or report.get("target") != "native" or report.get("test_scope") != "module" or report.get("skipped_files") != [] or type(report.get("inactive_mutants")) is not int or report["inactive_mutants"] != 0 or report.get("inactive_files") != []:
+    if type(report) is not dict or type(report.get("schema")) is not int or report["schema"] != 3 or report.get("turtles_version") != "0.4.0" or report.get("module") != str(helper) or report.get("target") != "native" or report.get("test_scope") != "module" or report.get("skipped_files") != [] or type(report.get("inactive_mutants")) is not int or report["inactive_mutants"] != 0 or report.get("inactive_files") != []:
         raise ValueError("requires a fresh exact schema-3 native helper campaign without skips")
     expected_files = {p.name: fnv(p.read_bytes()) for p in helper.iterdir() if p.is_file()}
     if report.get("files") != expected_files or (helper / "implementation.mbt").read_bytes() != extracted:
