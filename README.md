@@ -4,16 +4,18 @@ Mutation testing for MoonBit projects — the `cargo-mutants` idea, implemented 
 
 `turtles` finds small source-level changes ("mutants"), applies them one at a time in a **temporary copy** of your MoonBit module, and asks your tests to catch them. Surviving mutants point at behavior your tests don't actually pin down. Your working tree is never intentionally modified.
 
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
 ## Install
 
 The supported way to install `turtles` is `moon install`, which builds the native executable from source (requires the MoonBit toolchain). It puts a `turtles` binary in `~/.moon/bin` (the same directory `moon` itself lives in, so it is usually already on `PATH`). Override the destination with `--bin <DIR>`.
 
 ### Stable — Mooncakes
 
-The registry package is the default install path; `@0.3.0` pins the current release:
+The registry package is the default install path. The 0.4.0 release candidate's pinned install command is:
 
 ```sh
-moon install f4ah6o/turtles/cmd/turtles@0.3.0
+moon install f4ah6o/turtles/cmd/turtles@0.4.0
 ```
 
 ### Development — GitHub
@@ -22,10 +24,10 @@ moon install f4ah6o/turtles/cmd/turtles@0.3.0
 moon install https://github.com/f4ah6o/turtles.git cmd/turtles --branch main
 ```
 
-Pin a release once tags are published:
+Install from the matching source tag after it is created:
 
 ```sh
-moon install https://github.com/f4ah6o/turtles.git cmd/turtles --tag v0.3.0
+moon install https://github.com/f4ah6o/turtles.git cmd/turtles --tag v0.4.0
 ```
 
 ### From a local clone
@@ -37,7 +39,7 @@ moon install ./cmd/turtles
 ## First run in 30 seconds
 
 ```sh
-turtles --version          # turtles 0.3.0
+turtles --version          # turtles 0.4.0
 turtles --help
 
 cd path/to/your-moonbit-module
@@ -82,7 +84,7 @@ Note that `moon` itself already parallelizes a single build; `--jobs` paralleliz
 Install a pinned release and run turtles against your module:
 
 ```sh
-moon install f4ah6o/turtles/cmd/turtles@0.3.0
+moon install f4ah6o/turtles/cmd/turtles@0.4.0
 turtles --dir . --fail-under 80 --json turtles-report.json
 ```
 
@@ -136,7 +138,7 @@ Every run writes a schema-`3` report and per-survivor unified diffs to `<dir>/.t
 {
   "schema": 3,
   "module": "/abs/path",
-  "turtles_version": "0.3.0",
+  "turtles_version": "0.4.0",
   "moon_version": "moon 0.1.20260920 (914d7da 2026-09-20) ~/.moon/bin/moon",
   "target": "native",
   "inactive_mutants": 1,

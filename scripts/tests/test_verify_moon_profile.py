@@ -122,7 +122,7 @@ class ProfileTests(unittest.TestCase):
         offset = extracted.index(b"-")
         row = {"path": "implementation.mbt", "offset": offset, "end": offset+1, "original": "-", "replacement": "+", "group": "arithmetic", "line": 1, "column": offset+1, "visibility": "public", "outcome": "SURVIVED", "reused": False, "duration_ms": "1"}
         row["id"] = "m-" + V.fnv(f'implementation.mbt\0{offset}\0{offset+1}\0-\0+\0arithmetic'.encode())
-        report = {"schema": 3, "turtles_version": "0.3.0", "module": str(helper), "target": "native", "test_scope": "module", "skipped_files": [], "inactive_mutants": 0, "inactive_files": [], "files": {p.name: V.fnv(p.read_bytes()) for p in helper.iterdir()}, "mutants": [row], "summary": {"killed": 0, "survived": 1, "timeout": 0, "unviable": 0, "reused": 0}}
+        report = {"schema": 3, "turtles_version": "0.4.0", "module": str(helper), "target": "native", "test_scope": "module", "skipped_files": [], "inactive_mutants": 0, "inactive_files": [], "files": {p.name: V.fnv(p.read_bytes()) for p in helper.iterdir()}, "mutants": [row], "summary": {"killed": 0, "survived": 1, "timeout": 0, "unviable": 0, "reused": 0}}
         self.assertEqual(len(V.audit_turtles(report, helper, extracted, 64)), 1)
         corruptions = [lambda r: r.update(schema=2), lambda r: r.update(schema=True), lambda r: r.update(inactive_mutants=False),
                        lambda r: r.update(mutants=[]), lambda r: r["mutants"].append(copy.deepcopy(r["mutants"][0])),
