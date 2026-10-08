@@ -41,6 +41,9 @@ class ReleaseVersionTests(unittest.TestCase):
             root = Path(d)
             manifest = root / "moon.mod"
             manifest.write_text('version = "0.1.0"\n')
+            file = root / "cmd/turtles/config.mbt"
+            file.parent.mkdir(parents=True)
+            file.write_text('let turtles_version : String = "9.9.9"\n')
             with self.assertRaisesRegex(ValueError, "expected exactly one"):
                 changes_for(root, "turtles")
             self.assertEqual(manifest.read_text(), 'version = "0.1.0"\n')
