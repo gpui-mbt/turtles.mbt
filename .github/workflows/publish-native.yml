@@ -1,0 +1,85 @@
+name: Publish native executables for moon-binstall
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/publish-native.yml"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x86_64
+          - os: ubuntu-24.04-arm
+            platform: linux-aarch64
+          - os: macos-15-intel
+            platform: darwin-x86_64
+          - os: macos-15
+            platform: darwin-aarch64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: hustcer/setup-moonbit@v1
+      - name: Resolve dependencies
+        run: |
+          moon update
+          moon install
+      - name: Build MoonBit native executable
+        run: moon build cmd/turtles --target native --release
+      - name: Package raw release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t binaries < <(find _build/native/release/build -type f -name 'turtles.exe' -print)
+          if [ "${#binaries[@]}" -ne 1 ]; then
+            printf 'Expected exactly one turtles.exe, got %s\n' "${#binaries[@]}" >&2
+            exit 1
+          fi
+          mkdir -p release
+          cp -- "${binaries[0]}" "release/turtles-${{ matrix.platform }}"
+          chmod 755 "release/turtles-${{ matrix.platform }}"
+          test -s "release/turtles-${{ matrix.platform }}"
+      - name: Smoke check
+        shell: bash
+        run: |
+          set -euo pipefail
+          "./release/turtles-${{ matrix.platform }}" --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: release
+          merge-multiple: true
+      - name: Publish verified GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$(find release -type f | wc -l)" -eq 4
+          gh release create "${GITHUB_REF_NAME}" release/* --verify-tag --generate-notes --title "${GITHUB_REF_NAME}"
