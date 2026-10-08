@@ -21,8 +21,6 @@ jobs:
             platform: linux-x86_64
           - os: ubuntu-24.04-arm
             platform: linux-aarch64
-          - os: macos-15-intel
-            platform: darwin-x86_64
           - os: macos-15
             platform: darwin-aarch64
     runs-on: ${{ matrix.os }}
@@ -42,13 +40,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t binaries < <(find _build/native/release/build -type f -name 'turtles.exe' -print)
-          if [ "${#binaries[@]}" -ne 1 ]; then
-            printf 'Expected exactly one turtles.exe, got %s\n' "${#binaries[@]}" >&2
+          binaries=$(find _build/native/release/build -type f -name 'turtles.exe' -print)
+          count=$(printf '%s\n' "$binaries" | grep -c . || true)
+          if [ "$count" -ne 1 ]; then
+            printf 'Expected exactly one turtles.exe, got %s\n' "$count" >&2
             exit 1
           fi
           mkdir -p release
-          cp -- "${binaries[0]}" "release/turtles-${{ matrix.platform }}"
+          cp -- "$binaries" "release/turtles-${{ matrix.platform }}"
           chmod 755 "release/turtles-${{ matrix.platform }}"
           test -s "release/turtles-${{ matrix.platform }}"
       - name: Smoke check
@@ -81,5 +80,5 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          test "$(find release -type f | wc -l)" -eq 4
+          test "$(find release -type f | wc -l)" -eq 3
           gh release create "${GITHUB_REF_NAME}" release/* --verify-tag --generate-notes --title "${GITHUB_REF_NAME}"
