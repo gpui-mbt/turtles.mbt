@@ -271,4 +271,28 @@ The real fixture E2E also validates schema-3 JSON report generation, determinist
 
 ## Planned follow-ups
 
-JUnit reports, richer survivor context, and smarter default test selection are still open. Prebuilt release binaries remain out of scope — turtles needs the MoonBit toolchain at runtime anyway.
+JUnit reports, richer survivor context, and smarter default test selection are still open. The native executables are distributed as release assets; running turtles still requires the MoonBit toolchain.
+
+## Versioned native releases
+
+Edit the `version` field in `moon.mod` to the intended SemVer version
+(e.g., `0.1.0` to `0.1.1`) and merge that change into `main`.
+The release workflow compares the previous and new **version values**, not
+just the file modification date. On a version increase it validates
+version consistency, builds three native platforms, then creates the
+`vX.Y.Z` tag and GitHub Release for the matching commit.
+Other changes to `moon.mod` do not publish. Version downgrades fail.
+
+The raw executable assets are named `turtles-linux-x86_64`,
+`turtles-linux-aarch64`, and `turtles-darwin-aarch64`. GitHub exposes a
+SHA-256 digest for each uploaded asset.
+
+An explicitly pushed `vX.Y.Z` tag remains supported only when the tag
+matches `moon.mod`; the workflow never edits source versions or bumps
+versions on its own. Publishing requires successful binary builds and
+GitHub Actions permission to create a Release.
+If a release already exists as a draft, prerelease, or incomplete asset set,
+publishing stops and preserves it for manual repair. If tag lookup and the
+paginated release list disagree, publishing also stops for manual review.
+
+Update `cmd/turtles/config.mbt`'s `turtles_version` alongside `moon.mod`.
