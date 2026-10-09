@@ -5,6 +5,7 @@ import argparse
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 VERSION = re.compile(
@@ -183,6 +184,65 @@ def inspect_release_list_response(
     )
 
 
+def verify_remote_release_tag(
+    expected_tag: str,
+    explicit_tag: bool,
+    root: Path = Path("."),
+) -> str:
+    fetch = subprocess.run(
+        [
+            "git",
+            "fetch",
+            "--no-tags",
+            "--prune",
+            "origin",
+            "refs/tags/*:refs/release-verification/*",
+            "--quiet",
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if fetch.returncode != 0:
+        detail = fetch.stderr.strip()
+        suffix = f": {detail}" if detail else ""
+        raise ValueError(f"failed to fetch tags for release verification{suffix}")
+
+    tag_ref = f"refs/release-verification/{expected_tag}"
+    tag_exists = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", tag_ref],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if tag_exists.returncode == 1:
+        if explicit_tag:
+            raise ValueError(f"explicit tag {expected_tag} does not exist on origin")
+        return "missing"
+    if tag_exists.returncode != 0:
+        detail = tag_exists.stderr.strip()
+        suffix = f": {detail}" if detail else ""
+        raise ValueError(f"failed to inspect remote tag {expected_tag}{suffix}")
+
+    tagged_commit = subprocess.run(
+        ["git", "rev-list", "-n", "1", tag_ref],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if tagged_commit.returncode != 0 or head.returncode != 0:
+        raise ValueError(f"failed to resolve remote tag {expected_tag} or HEAD")
+    if tagged_commit.stdout.strip() != head.stdout.strip():
+        raise ValueError(f"tag {expected_tag} points at a different commit")
+    return "present"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate MoonBit versioned releases")
     parser.add_argument(
@@ -193,6 +253,7 @@ def main() -> int:
             "changed",
             "check-existing-release",
             "check-release-list",
+            "verify-tag-ref",
         ),
     )
     parser.add_argument("--root", type=Path, default=Path("."))
@@ -201,6 +262,7 @@ def main() -> int:
     parser.add_argument("--previous-file", type=Path)
     parser.add_argument("--response-file", type=Path)
     parser.add_argument("--request-exit-code", type=int)
+    parser.add_argument("--explicit-tag", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve()
     source = (root / "moon.mod").read_text(encoding="utf-8")
@@ -241,6 +303,10 @@ def main() -> int:
                 args.tag,
             )
         print(state)
+    elif args.action == "verify-tag-ref":
+        if args.tag is None:
+            parser.error("--tag is required for verify-tag-ref")
+        print(verify_remote_release_tag(args.tag, args.explicit_tag, root))
     else:
         print(tag)
     return 0

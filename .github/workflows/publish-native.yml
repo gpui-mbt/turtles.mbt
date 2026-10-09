@@ -8,6 +8,7 @@ on:
       - ".github/workflows/publish-native.yml"
       - "scripts/release_version.py"
       - "scripts/tests/test_release_version.py"
+      - "scripts/tests/test_release_tag_fetch.py"
   push:
     branches: [main]
     tags: ["v*"]
@@ -27,7 +28,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Release guard unit tests
-        run: python3 -m unittest discover -s scripts/tests -p 'test_release_version.py' -v
+        run: python3 -m unittest discover -s scripts/tests -p 'test_release_*.py' -v
       - name: Detect explicit manifest version change
         id: resolve
         shell: bash
@@ -103,6 +104,9 @@ jobs:
   publish:
     if: github.event_name == 'push' && needs.prepare.outputs.release_tag != ''
     needs: [prepare, build]
+    concurrency:
+      group: turtles-release-${{ needs.prepare.outputs.release_tag }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -123,17 +127,14 @@ jobs:
         run: |
           set -euo pipefail
           test "$(find release -type f | wc -l)" -eq 3
-          git fetch origin --tags --quiet
-          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
-            tagged_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
-            test "$tagged_commit" = "$(git rev-parse HEAD)" || {
-              echo "Tag $RELEASE_TAG points at a different commit" >&2
-              exit 1
-            }
-          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            echo "Explicit tag $RELEASE_TAG does not exist" >&2
-            exit 1
+          verify_tag_args=()
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            verify_tag_args+=(--explicit-tag)
           fi
+          tag_ref_state="$(python3 scripts/release_version.py verify-tag-ref \
+            --kind turtles \
+            --tag "$RELEASE_TAG" \
+            "${verify_tag_args[@]}")"
           response_file="$RUNNER_TEMP/release-response.txt"
           api_error_file="$RUNNER_TEMP/release-api-error.txt"
           api_exit_code=0
@@ -184,8 +185,11 @@ jobs:
             echo "Unexpected release-list validation state: $release_list_state" >&2
             exit 1
           }
-          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+          if [[ "$tag_ref_state" == "present" ]]; then
             gh release create "$RELEASE_TAG" release/* --verify-tag --generate-notes --title "$RELEASE_TAG"
-          else
+          elif [[ "$tag_ref_state" == "missing" && "$GITHUB_REF" == "refs/heads/main" ]]; then
             gh release create "$RELEASE_TAG" release/* --target "$GITHUB_SHA" --generate-notes --title "$RELEASE_TAG"
+          else
+            echo "Unexpected remote tag state for $RELEASE_TAG: $tag_ref_state" >&2
+            exit 1
           fi
