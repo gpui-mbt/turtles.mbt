@@ -1,18 +1,56 @@
 name: Publish native executables for moon-binstall
 
+
 on:
   pull_request:
     paths:
+      - "moon.mod"
       - ".github/workflows/publish-native.yml"
+      - "scripts/release_version.py"
+      - "scripts/tests/test_release_version.py"
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "moon.mod"
 
 permissions:
   contents: read
 
 jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Release guard unit tests
+        run: python3 -m unittest discover -s scripts/tests -p 'test_release_version.py' -v
+      - name: Detect explicit manifest version change
+        id: resolve
+        shell: bash
+        env:
+          RELEASE_KIND: turtles
+          EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          release_tag=""
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            python3 scripts/release_version.py check-tag --kind "$RELEASE_KIND" --tag "$GITHUB_REF_NAME"
+            release_tag="$GITHUB_REF_NAME"
+          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            git show "${EVENT_BEFORE}:moon.mod" > "$RUNNER_TEMP/previous-moon.mod"
+            release_tag="$(python3 scripts/release_version.py changed --kind "$RELEASE_KIND" --previous-file "$RUNNER_TEMP/previous-moon.mod")"
+          else
+            python3 scripts/release_version.py read --kind "$RELEASE_KIND"
+          fi
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare
+    if: github.event_name == 'pull_request' || needs.prepare.outputs.release_tag != ''
     strategy:
       fail-fast: false
       matrix:
@@ -63,12 +101,15 @@ jobs:
           retention-days: 7
 
   publish:
-    if: github.ref_type == 'tag'
-    needs: build
+    if: github.event_name == 'push' && needs.prepare.outputs.release_tag != ''
+    needs: [prepare, build]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           pattern: native-*
@@ -78,7 +119,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
           set -euo pipefail
           test "$(find release -type f | wc -l)" -eq 3
-          gh release create "${GITHUB_REF_NAME}" release/* --verify-tag --generate-notes --title "${GITHUB_REF_NAME}"
+          git fetch origin --tags --quiet
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            tagged_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+            test "$tagged_commit" = "$(git rev-parse HEAD)" || {
+              echo "Tag $RELEASE_TAG points at a different commit" >&2
+              exit 1
+            }
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "Explicit tag $RELEASE_TAG does not exist" >&2
+            exit 1
+          fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already published"
+            exit 0
+          fi
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            gh release create "$RELEASE_TAG" release/* --verify-tag --generate-notes --title "$RELEASE_TAG"
+          else
+            gh release create "$RELEASE_TAG" release/* --target "$GITHUB_SHA" --generate-notes --title "$RELEASE_TAG"
+          fi
