@@ -1,4 +1,4 @@
-name: Publish native executables for moon-binstall
+name: Publish native turtles executables
 
 
 on:
@@ -134,10 +134,56 @@ jobs:
             echo "Explicit tag $RELEASE_TAG does not exist" >&2
             exit 1
           fi
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Release $RELEASE_TAG already published"
+          response_file="$RUNNER_TEMP/release-response.txt"
+          api_error_file="$RUNNER_TEMP/release-api-error.txt"
+          api_exit_code=0
+          if gh api --include "repos/$GH_REPO/releases/tags/$RELEASE_TAG" >"$response_file" 2>"$api_error_file"; then
+            api_exit_code=0
+          else
+            api_exit_code=$?
+          fi
+          if release_state="$(python3 scripts/release_version.py check-existing-release \
+            --kind turtles \
+            --tag "$RELEASE_TAG" \
+            --response-file "$response_file" \
+            --request-exit-code "$api_exit_code" 2>"$RUNNER_TEMP/release-validation-error.txt")"; then
+            :
+          else
+            cat "$RUNNER_TEMP/release-validation-error.txt" >&2
+            cat "$api_error_file" >&2
+            exit 1
+          fi
+          if [[ "$release_state" == "complete" ]]; then
+            echo "Release $RELEASE_TAG is already published with all expected assets"
             exit 0
           fi
+          test "$release_state" = "missing" || {
+            echo "Unexpected release validation state: $release_state" >&2
+            exit 1
+          }
+          release_list_file="$RUNNER_TEMP/release-list.json"
+          release_list_error_file="$RUNNER_TEMP/release-list-api-error.txt"
+          release_list_exit_code=0
+          if gh api --paginate --slurp "repos/$GH_REPO/releases?per_page=100" >"$release_list_file" 2>"$release_list_error_file"; then
+            release_list_exit_code=0
+          else
+            release_list_exit_code=$?
+          fi
+          if release_list_state="$(python3 scripts/release_version.py check-release-list \
+            --kind turtles \
+            --tag "$RELEASE_TAG" \
+            --response-file "$release_list_file" \
+            --request-exit-code "$release_list_exit_code" 2>"$RUNNER_TEMP/release-list-validation-error.txt")"; then
+            :
+          else
+            cat "$RUNNER_TEMP/release-list-validation-error.txt" >&2
+            cat "$release_list_error_file" >&2
+            exit 1
+          fi
+          test "$release_list_state" = "missing" || {
+            echo "Unexpected release-list validation state: $release_list_state" >&2
+            exit 1
+          }
           if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
             gh release create "$RELEASE_TAG" release/* --verify-tag --generate-notes --title "$RELEASE_TAG"
           else
