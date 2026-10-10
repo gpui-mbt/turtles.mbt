@@ -173,6 +173,13 @@ async test "witness eligibility maps each disqualifier to its skip reason" {
 }
 
 ///|
+test "package ownership accepts Windows separators" {
+  let pkg_dirs = Map([(".", true), ("pkg", true), ("pkg/nested", true)])
+  assert_eq(pkg_dir_of(pkg_dirs, "pkg\\nested\\lib.mbt"), "pkg/nested")
+  assert_eq(pkg_dir_of(pkg_dirs, "pkg/nested/lib.mbt"), "pkg/nested")
+}
+
+///|
 async test "witness helper names embed the mutant id and retry up to 16" {
   let dir = @fs.tmpdir(prefix="turtles-index")
   @async.with_task_group(group => {

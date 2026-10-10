@@ -4,6 +4,16 @@ fn path_join(left : String, right : String) -> String {
 }
 
 ///|
+#cfg(platform="windows")
+fn relative_path(root : String, path : String) -> String {
+  @path.Path(path)
+  .relative(base=@path.Path(root))
+  .to_string()
+  .replace_all(old="\\", new="/")
+}
+
+///|
+#cfg(not(platform="windows"))
 fn relative_path(root : String, path : String) -> String {
   @path.Path(path).relative(base=@path.Path(root)).to_string()
 }
@@ -159,6 +169,7 @@ async fn discover_mutations(
 /// the caller's read/write/execute rights — the only user a private temporary
 /// workspace serves. A read-only file stays unwritable and a private file
 /// stays private.
+#cfg(not(platform="windows"))
 async fn observed_permission(path : String) -> Int {
   let read = @fs.can_read(path) catch { _ => false }
   let write = @fs.can_write(path) catch { _ => false }
@@ -177,12 +188,56 @@ async fn observed_permission(path : String) -> Int {
 }
 
 ///|
+#cfg(platform="windows")
+fn observed_permission(_path : String) -> Int {
+  // NTFS access is controlled by ACLs, not POSIX mode bits. Treat modes as
+  // unchanged and let the temporary workspace inherit its parent ACL.
+  0
+}
+
+///|
+#cfg(not(platform="windows"))
+async fn set_permission(path : String, permission : Int) -> Unit {
+  @fs.chmod(path, permission)
+}
+
+///|
+#cfg(platform="windows")
+fn set_permission(_path : String, _permission : Int) -> Unit {
+  // @fs.chmod is not supported by the Windows filesystem adapter.
+  ()
+}
+
+///|
+#cfg(not(platform="windows"))
+async fn try_set_permission(path : String, permission : Int) -> Bool {
+  @fs.chmod(path, permission) catch {
+    _ => return false
+  }
+  true
+}
+
+///|
+#cfg(platform="windows")
+fn try_set_permission(_path : String, _permission : Int) -> Bool {
+  true
+}
+
+///|
 /// Regular files keep their permission bits: the temporary workspace must
 /// behave like the original module for baseline parity.
+#cfg(not(platform="windows"))
 async fn copy_regular_file(source : String, target : String) -> Unit {
-  let permission = observed_permission(source)
   let data = @fs.read_file(source)
+  let permission = observed_permission(source)
   @fs.write_file(target, data, permission~)
+}
+
+///|
+#cfg(platform="windows")
+async fn copy_regular_file(source : String, target : String) -> Unit {
+  let data = @fs.read_file(source)
+  @fs.write_file(target, data)
 }
 
 ///|
@@ -202,7 +257,7 @@ async fn dereference_copy(
     copy_tree(resolved, resolved, target)
     // Restore observed permissions only after contents are in place: a
     // non-writable source directory must still accept its own copies.
-    @fs.chmod(target, observed_permission(source))
+    set_permission(target, observed_permission(source))
   } else {
     fail("cannot preserve symbolic link \{relative}: unsupported target kind")
   }
@@ -247,8 +302,8 @@ async fn copy_symlink(
 /// permissions first. Files need no chmod: unlinking them only requires a
 /// writable parent.
 async fn make_writable_tree(dir : String) -> Unit {
-  @fs.chmod(dir, 0o700) catch {
-    _ => return
+  if !try_set_permission(dir, 0o700) {
+    return
   }
   let names = @fs.readdir(dir, include_hidden=true, sort=true) catch {
     _ => return
@@ -337,9 +392,7 @@ async fn sweep_workspace(
 ) -> Unit {
   // A test may have made the workspace root itself non-traversable;
   // without this chmod the sweep below cannot even list it.
-  @fs.chmod(root, 0o700) catch {
-    _ => ()
-  }
+  try_set_permission(root, 0o700) |> ignore
   sweep_dir(root, root, reference, manifest)
   // Restore anything missing or changed. Strays are already gone.
   for entry in manifest.files {
@@ -362,9 +415,7 @@ async fn sweep_workspace(
         // chmod only real files: on a symlink it would follow through
         // and touch the link target, which may live outside the module.
         if kind is Regular {
-          @fs.chmod(current, 0o600) catch {
-            _ => ()
-          }
+          try_set_permission(current, 0o600) |> ignore
         }
         @fs.remove(current) catch {
           _ => ()
@@ -410,7 +461,7 @@ async fn sweep_workspace(
       @fs.mkdir(current, recursive=true)
     }
     match manifest.dirs.get(relative) {
-      Some(perm) => @fs.chmod(current, perm)
+      Some(perm) => set_permission(current, perm)
       None => ()
     }
   }
@@ -438,9 +489,7 @@ async fn sweep_dir(
         // A test may have made this dir non-traversable; loosen it so the
         // sweep can list and clean inside. The recorded mode is restored
         // afterwards by sweep_workspace's permission pass.
-        @fs.chmod(full, 0o700) catch {
-          _ => ()
-        }
+        try_set_permission(full, 0o700) |> ignore
         sweep_dir(root, full, reference, manifest)
       } else {
         force_rmdir(full)
@@ -493,7 +542,7 @@ async fn copy_tree(
       copy_tree(root, source, destination)
       // Restore observed permissions only after contents are in place: a
       // non-writable source directory must still accept its own copies.
-      @fs.chmod(target, observed)
+      set_permission(target, observed)
     } else if kind is Regular {
       let relative = relative_path(root, source)
       let target = path_join(destination, relative)

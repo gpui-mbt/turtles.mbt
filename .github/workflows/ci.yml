@@ -350,3 +350,24 @@ jobs:
           PY
       - name: Binary self-verification e2e
         run: sh scripts/self_e2e.sh
+
+  windows-native:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: hustcer/setup-moonbit@v1
+      - name: Resolve dependencies
+        run: moon update
+      - name: Check version consistency
+        run: python scripts/release_version.py read --kind turtles
+      - name: Check formatting
+        run: moon fmt --check
+      - name: Check native target
+        run: moon check --target native --deny-warn
+      - name: Test native target
+        run: moon test --target native
+      - name: Run release guard tests
+        run: python -m unittest discover -s scripts/tests -p 'test_release_*.py' -v
+      - name: Run native fixtures, parallel workers, and target filtering
+        run: python scripts/windows_smoke.py

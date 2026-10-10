@@ -20,6 +20,7 @@ EXPECTED_RELEASE_ASSETS = {
             "turtles-darwin-aarch64",
             "turtles-linux-aarch64",
             "turtles-linux-x86_64",
+            "turtles-windows-x86_64.exe",
         }
     ),
 }

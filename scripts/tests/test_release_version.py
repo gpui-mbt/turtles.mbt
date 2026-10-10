@@ -83,6 +83,7 @@ class ReleaseVersionTests(unittest.TestCase):
                     "turtles-darwin-aarch64",
                     "turtles-linux-aarch64",
                     "turtles-linux-x86_64",
+                    "turtles-windows-x86_64.exe",
                 )
             ],
         }
@@ -103,6 +104,7 @@ class ReleaseVersionTests(unittest.TestCase):
                     "turtles-darwin-aarch64",
                     "turtles-linux-aarch64",
                     "turtles-linux-x86_64",
+                    "turtles-windows-x86_64.exe",
                 }
             ),
         )
@@ -125,7 +127,7 @@ class ReleaseVersionTests(unittest.TestCase):
     def test_partial_release_is_not_treated_as_published(self):
         release = self._valid_release()
         release["assets"].pop()
-        with self.assertRaisesRegex(ValueError, "exactly 3"):
+        with self.assertRaisesRegex(ValueError, "exactly 4"):
             self._inspect(release)
 
     def test_missing_asset_digest_is_not_treated_as_published(self):
@@ -166,7 +168,7 @@ class ReleaseVersionTests(unittest.TestCase):
                 self._response(404, {"message": "Not Found"}),
                 1,
                 "v0.4.0",
-                frozenset({"turtles-darwin-aarch64", "turtles-linux-aarch64", "turtles-linux-x86_64"}),
+                frozenset({"turtles-darwin-aarch64", "turtles-linux-aarch64", "turtles-linux-x86_64", "turtles-windows-x86_64.exe"}),
             ),
             "missing",
         )
@@ -185,7 +187,7 @@ class ReleaseVersionTests(unittest.TestCase):
                     self._response(status, {"message": "API error"}),
                     1,
                     "v0.4.0",
-                    frozenset({"turtles-darwin-aarch64", "turtles-linux-aarch64", "turtles-linux-x86_64"}),
+                    frozenset({"turtles-darwin-aarch64", "turtles-linux-aarch64", "turtles-linux-x86_64", "turtles-windows-x86_64.exe"}),
                 )
 
     def test_api_transport_failure_without_status_fails_closed(self):
@@ -198,6 +200,7 @@ class ReleaseVersionTests(unittest.TestCase):
                 "turtles-darwin-aarch64",
                 "turtles-linux-aarch64",
                 "turtles-linux-x86_64",
+                "turtles-windows-x86_64.exe",
             }
         )
         self.assertEqual(
