@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -15,10 +16,24 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(moon: str, args: list[str], expected: int, label: str) -> str:
+ProcessIdentity = tuple[int, str, str, str, str]
+
+
+def process_environment(moon: str) -> dict[str, str]:
+    """Keep nested `moon` commands on the same toolchain as the smoke runner."""
+    env = os.environ.copy()
+    moon_bin = str(Path(moon).resolve().parent)
+    env["PATH"] = moon_bin + os.pathsep + env.get("PATH", "")
+    return env
+
+
+def run(
+    executable: str, args: list[str], expected: int, label: str, env: dict[str, str]
+) -> str:
     completed = subprocess.run(
-        [moon, *args],
+        [executable, *args],
         cwd=ROOT,
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -59,7 +74,7 @@ def windows_processes(powershell: str) -> list[dict]:
     command = (
         "$ErrorActionPreference='Stop'; "
         "Get-CimInstance Win32_Process | "
-        "Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine | "
+        "Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine,CreationDate | "
         "ConvertTo-Json -Compress"
     )
     completed = subprocess.run(
@@ -80,64 +95,132 @@ def windows_processes(powershell: str) -> list[dict]:
     return parsed if isinstance(parsed, list) else [parsed]
 
 
-def process_identity(row: dict) -> tuple[int, str, str, str]:
+def process_identity(row: dict) -> ProcessIdentity:
+    creation_date = str(row.get("CreationDate") or "")
+    if not creation_date:
+        raise RuntimeError("Windows process snapshot omitted CreationDate")
     return (
         int(row["ProcessId"]),
-        str(row["Name"] or ""),
+        str(row["Name"] or "").casefold(),
         str(row["ExecutablePath"] or "").casefold(),
         str(row["CommandLine"] or "").casefold(),
+        creation_date,
     )
 
 
-def process_children(
-    processes: list[dict], root_pid: int, expected_executable: str
-) -> set[tuple[int, str, str, str]]:
-    children: dict[int, list[int]] = {}
+def find_process_identity(
+    processes: list[dict],
+    root_pid: int,
+    expected_executable: str,
+    expected_command_fragment: str,
+) -> ProcessIdentity | None:
     by_pid = {int(row["ProcessId"]): row for row in processes}
     root = by_pid.get(root_pid)
-    if root is None or str(root["ExecutablePath"] or "").casefold() != expected_executable:
-        # The child may have exited between poll() and this process snapshot. A
-        # reused PID must not turn an unrelated Windows process into a leak.
+    if root is None:
+        return None
+    identity = process_identity(root)
+    if (
+        identity[2] != expected_executable.casefold()
+        or expected_command_fragment.casefold() not in identity[3]
+    ):
+        return None
+    return identity
+
+
+def process_children(
+    processes: list[dict],
+    root_identity: ProcessIdentity,
+    expected_child_executable: str,
+) -> set[ProcessIdentity]:
+    by_pid = {int(row["ProcessId"]): row for row in processes}
+    root = by_pid.get(root_identity[0])
+    # A child may exit between two snapshots. Requiring the complete root
+    # identity prevents a reused PID from making an unrelated process look like
+    # the turtles process whose subprocesses this smoke is tracking.
+    if root is None or process_identity(root) != root_identity:
         return set()
-    for row in processes:
-        children.setdefault(int(row["ParentProcessId"] or 0), []).append(
-            int(row["ProcessId"])
-        )
     return {
         process_identity(by_pid[child])
-        for child in children.get(root_pid, [])
-        if child in by_pid
+        for child, row in by_pid.items()
+        if int(row["ParentProcessId"] or 0) == root_identity[0]
+        and str(row["ExecutablePath"] or "").casefold()
+        == expected_child_executable.casefold()
     }
 
 
-def run_timeout_smoke(moon: str, report: Path) -> None:
+def require_observed_children(children: set[ProcessIdentity]) -> None:
+    if not children:
+        raise RuntimeError("timeout smoke observed no direct nested moon.exe children")
+
+
+def require_children_exited(
+    observed: set[ProcessIdentity], live: set[ProcessIdentity]
+) -> None:
+    remaining = observed & live
+    if remaining:
+        raise RuntimeError(
+            "timed-out direct subprocess children remain alive: "
+            f"{sorted(pid for pid, _, _, _, _ in remaining)}"
+        )
+
+
+def run_timeout_smoke(
+    turtles: str, moon: str, report: Path, env: dict[str, str]
+) -> None:
     powershell = shutil.which("powershell.exe")
     if powershell is None:
         raise RuntimeError("powershell.exe is required for the Windows timeout check")
 
     command = [
-        moon, "run", "cmd/turtles", "--", "--dir", "fixtures/timeout",
+        turtles, "--dir", "fixtures/timeout",
         "--target", "native", "--timeout", "1", "--json", str(report),
     ]
     process = subprocess.Popen(
         command,
         cwd=ROOT,
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
         errors="replace",
     )
-    expected_executable = str(Path(moon).resolve()).casefold()
-    seen_descendants: set[tuple[int, str, str, str]] = set()
-    while process.poll() is None:
-        seen_descendants.update(
-            process_children(
-                windows_processes(powershell), process.pid, expected_executable
-            )
-        )
-        time.sleep(0.2)
-    output, _ = process.communicate(timeout=30)
+    expected_turtles = str(Path(turtles).resolve())
+    expected_moon = str(Path(moon).resolve())
+    seen_children: set[ProcessIdentity] = set()
+    root_identity: ProcessIdentity | None = None
+    deadline = time.monotonic() + 180
+    try:
+        while True:
+            snapshot = windows_processes(powershell)
+            if root_identity is None:
+                root_identity = find_process_identity(
+                    snapshot,
+                    process.pid,
+                    expected_turtles,
+                    "--dir fixtures/timeout",
+                )
+            if root_identity is not None:
+                seen_children.update(
+                    process_children(snapshot, root_identity, expected_moon)
+                )
+            if process.poll() is not None:
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "timeout fixture exceeded the 180-second smoke deadline"
+                )
+            time.sleep(0.1)
+        output, _ = process.communicate(timeout=30)
+    except BaseException:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=30)
+        raise
+
+    if root_identity is None:
+        raise RuntimeError("timeout smoke never observed its turtles.exe process")
+    require_observed_children(seen_children)
     if process.returncode != 1:
         raise RuntimeError(
             f"timeout fixture: expected exit 1, got {process.returncode}\n{output}"
@@ -145,18 +228,31 @@ def run_timeout_smoke(moon: str, report: Path) -> None:
     timeout_report = read_report(report)
     assert timeout_report["summary"]["timeout"] == 1, timeout_report["summary"]
 
-    deadline = time.monotonic() + 8
+    cleanup_deadline = time.monotonic() + 8
     live_processes = {process_identity(row) for row in windows_processes(powershell)}
-    remaining = seen_descendants & live_processes
-    while remaining and time.monotonic() < deadline:
+    remaining = seen_children & live_processes
+    while remaining and time.monotonic() < cleanup_deadline:
         time.sleep(0.2)
         live_processes = {process_identity(row) for row in windows_processes(powershell)}
-        remaining = seen_descendants & live_processes
-    if remaining:
+        remaining = seen_children & live_processes
+    require_children_exited(seen_children, live_processes)
+
+
+def build_turtles(moon: str, env: dict[str, str]) -> Path:
+    run(
+        moon,
+        ["build", "cmd/turtles", "--target", "native"],
+        0,
+        "build native CLI",
+        env,
+    )
+    build_dir = ROOT / "_build" / "native" / "debug" / "build"
+    executables = list(build_dir.rglob("turtles.exe"))
+    if len(executables) != 1:
         raise RuntimeError(
-            "timed-out direct subprocess children remain alive: "
-            f"{sorted(pid for pid, _, _, _ in remaining)}"
+            f"expected one native turtles.exe under {build_dir}, found {executables}"
         )
+    return executables[0].resolve()
 
 
 def main() -> int:
@@ -164,19 +260,23 @@ def main() -> int:
     if moon is None:
         raise RuntimeError("moon was not found on PATH")
 
+    env = process_environment(moon)
+    turtles = str(build_turtles(moon, env))
+
     with tempfile.TemporaryDirectory(prefix="turtles-windows-") as scratch:
         temp = Path(scratch)
 
         basic = temp / "basic-report.json"
         run(
-            moon,
+            turtles,
             [
-                "run", "cmd/turtles", "--", "--dir", "fixtures/basic",
+                "--dir", "fixtures/basic",
                 "--target", "native", "--timeout", "120", "--jobs", "4",
                 "--json", str(basic),
             ],
             0,
             "basic parallel fixture",
+            env,
         )
         basic_report = read_report(basic)
         assert basic_report["schema"] == 3
@@ -188,14 +288,15 @@ def main() -> int:
         parallel = temp / "isolation-parallel.json"
         for report, jobs in ((sequential, 1), (parallel, 4)):
             run(
-                moon,
+                turtles,
                 [
-                    "run", "cmd/turtles", "--", "--dir", "fixtures/isolation",
+                    "--dir", "fixtures/isolation",
                     "--target", "native", "--timeout", "120", "--jobs", str(jobs),
                     "--json", str(report),
                 ],
                 1,
                 f"isolation fixture with {jobs} worker(s)",
+                env,
             )
         isolation_reports = [read_report(sequential), read_report(parallel)]
         for report in isolation_reports:
@@ -209,10 +310,11 @@ def main() -> int:
         ]
 
         native_list = run(
-            moon,
-            ["run", "cmd/turtles", "--", "--dir", "fixtures/targets", "--target", "native", "--list"],
+            turtles,
+            ["--dir", "fixtures/targets", "--target", "native", "--list"],
             0,
             "native target discovery",
+            env,
         )
         assert "common.mbt:" in native_list
         assert "native_only.mbt:" in native_list
@@ -222,14 +324,15 @@ def main() -> int:
         targets = temp / "targets-report.json"
         target_output = temp / "targets-output"
         run(
-            moon,
+            turtles,
             [
-                "run", "cmd/turtles", "--", "--dir", "fixtures/targets",
+                "--dir", "fixtures/targets",
                 "--target", "native", "--timeout", "120", "--json", str(targets),
                 "--output-dir", str(target_output),
             ],
             1,
             "native target classification",
+            env,
         )
         target_report = read_report(targets)
         assert target_report["target"] == "native"
@@ -240,7 +343,7 @@ def main() -> int:
             for mutant in target_report["mutants"]
         )
 
-        run_timeout_smoke(moon, temp / "timeout-report.json")
+        run_timeout_smoke(turtles, moon, temp / "timeout-report.json", env)
 
     print("Windows native subprocess, temp workspace, parallel, and target smoke checks passed")
     return 0
