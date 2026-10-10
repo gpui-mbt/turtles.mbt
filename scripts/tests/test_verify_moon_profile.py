@@ -2,6 +2,7 @@
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -82,7 +83,7 @@ class ProfileTests(unittest.TestCase):
         self.assertTrue(row["timed_out"])
         self.assertLess(time.monotonic() - started, 5)
 
-    def test_source_copy_rejects_external_links_and_preserves_mode(self):
+    def test_source_copy_rejects_external_links_and_preserves_mode_where_supported(self):
         source = self.root / "source"
         source.mkdir()
         (source / "a").write_text("source")
@@ -90,7 +91,8 @@ class ProfileTests(unittest.TestCase):
         (source / "internal").symlink_to("a")
         destination = self.root / "copy"
         V.copy_source(source, destination)
-        self.assertEqual((destination / "a").stat().st_mode & 0o777, 0o755)
+        if os.name != "nt":
+            self.assertEqual((destination / "a").stat().st_mode & 0o777, 0o755)
         self.assertEqual((destination / "internal").read_text(), "source")
         self.assertFalse((destination / "internal").is_symlink())
         baseline = V.snapshot(destination)

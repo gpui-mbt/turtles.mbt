@@ -16,6 +16,10 @@ fn moon_args(args : Array[String], target : String?) -> Array[String] {
 }
 
 ///|
+/// Darwin can use Homebrew's `gtimeout`, while GNU/Linux commonly provides
+/// `timeout`. Missing commands raise OSError, so probe failures simply leave
+/// the direct-process cancellation path available.
+#cfg(not(platform="windows"))
 async fn probe_group_timeout_from(
   temp : String,
   candidates : Array[String],
@@ -35,10 +39,19 @@ async fn probe_group_timeout_from(
 }
 
 ///|
+#cfg(not(platform="windows"))
 async fn probe_group_timeout(temp : String) -> String? {
   // Prefer Homebrew's name so the Darwin CI path exercises the same helper
   // users install there, even if a second coreutils alias is on PATH.
   probe_group_timeout_from(temp, ["gtimeout", "timeout"])
+}
+
+///|
+#cfg(platform="windows")
+async fn probe_group_timeout(_temp : String) -> String? {
+  // Windows has a different built-in command named `timeout`; never invoke it
+  // with GNU timeout's arguments or claim process-group cancellation support.
+  None
 }
 
 ///|

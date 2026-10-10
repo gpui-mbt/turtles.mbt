@@ -12,10 +12,10 @@ The supported way to install `turtles` is `moon install`, which builds the nativ
 
 ### Stable — Mooncakes
 
-The registry package is the default install path. The 0.4.2 package's pinned install command is:
+The registry package is the default install path. The 0.4.3 package's pinned install command is:
 
 ```sh
-moon install f4ah6o/turtles/cmd/turtles@0.4.2
+moon install f4ah6o/turtles/cmd/turtles@0.4.3
 ```
 
 ### Development — GitHub
@@ -27,7 +27,7 @@ moon install https://github.com/gpui-mbt/turtles.mbt.git cmd/turtles --branch ma
 Install from the matching source tag after it is created:
 
 ```sh
-moon install https://github.com/gpui-mbt/turtles.mbt.git cmd/turtles --tag v0.4.2
+moon install https://github.com/gpui-mbt/turtles.mbt.git cmd/turtles --tag v0.4.3
 ```
 
 ### From a local clone
@@ -39,7 +39,7 @@ moon install ./cmd/turtles
 ## First run in 30 seconds
 
 ```sh
-turtles --version          # turtles 0.4.2 for this source release
+turtles --version          # turtles 0.4.3 for this source release
 turtles --help
 
 cd path/to/your-moonbit-module
@@ -84,7 +84,7 @@ Note that `moon` itself already parallelizes a single build; `--jobs` paralleliz
 Install a pinned release and run turtles against your module:
 
 ```sh
-moon install f4ah6o/turtles/cmd/turtles@0.4.2
+moon install f4ah6o/turtles/cmd/turtles@0.4.3
 turtles --dir . --fail-under 80 --json turtles-report.json
 ```
 
@@ -128,12 +128,12 @@ Outcome classification:
 - **KILLED** — `moon check` succeeded and `moon test` failed.
 - **SURVIVED** — both commands succeeded; tests did not detect the change.
 - **TIMEOUT** — checking or testing exceeded the configured timeout.
+- **UNVIABLE** — `moon check` rejected the mutated source.
 
 On macOS, `timeout` is not included with the system tools. If GNU coreutils'
 `gtimeout` is on `PATH`, turtles uses it to terminate the command's process
 group. Without it, turtles hard-cancels the direct `moon` process; subprocesses
 that Moon already started may continue until they exit.
-- **UNVIABLE** — `moon check` rejected the mutated source.
 
 After the summary counts, every `SURVIVED`/`TIMEOUT` mutant is reprinted under `Mutants needing attention:` so the actionable list is at the end of the output.
 
@@ -143,7 +143,7 @@ Every run writes a schema-`3` report and per-survivor unified diffs to `<dir>/.t
 {
   "schema": 3,
   "module": "/abs/path",
-  "turtles_version": "0.4.2",
+  "turtles_version": "0.4.3",
   "moon_version": "moon 0.1.20260920 (914d7da 2026-09-20) ~/.moon/bin/moon",
   "target": "native",
   "inactive_mutants": 1,
@@ -281,16 +281,17 @@ JUnit reports, richer survivor context, and smarter default test selection are s
 ## Versioned native releases
 
 Edit the `version` field in `moon.mod` to the intended SemVer version
-(e.g., `0.4.1` to `0.4.2`) and merge that change into `main`.
+(e.g., `0.4.2` to `0.4.3`) and merge that change into `main`.
 The release workflow compares the previous and new **version values**, not
 just the file modification date. On a version increase it validates
-version consistency, builds three native platforms, then creates the
+version consistency, builds four native platforms, then creates the
 `vX.Y.Z` tag and GitHub Release for the matching commit.
 Other changes to `moon.mod` do not publish. Version downgrades fail.
 
 The raw executable assets are named `turtles-linux-x86_64`,
-`turtles-linux-aarch64`, and `turtles-darwin-aarch64`. GitHub exposes a
-SHA-256 digest for each uploaded asset.
+`turtles-linux-aarch64`, `turtles-darwin-aarch64`, and
+`turtles-windows-x86_64.exe`. GitHub exposes a SHA-256 digest for each
+uploaded asset.
 
 An explicitly pushed `vX.Y.Z` tag remains supported only when the tag
 matches `moon.mod`; the workflow never edits source versions or bumps

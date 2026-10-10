@@ -16,7 +16,7 @@
 
 ### Migration
 
-## 0.4.2 (candidate for review)
+## 0.4.3 (candidate for review)
 
 ### Improved
 
@@ -31,8 +31,18 @@
 
 - Point the module metadata and GitHub install examples at the maintained `gpui-mbt/turtles.mbt` repository; the Mooncakes package remains `f4ah6o/turtles`.
 - Run native check, unit-test, and mutation-fixture coverage on Apple Silicon macOS, including the no-GNU-timeout runner path.
-
 - Verify that the Darwin release runner and packaged turtles executable are arm64 before uploading the artifact.
+
+## 0.4.2
+
+### Improved
+
+- Normalize module-relative paths before package ownership and target-plan lookups so Windows separators do not hide nested packages.
+- Exercise native Windows fixture mutation, parallel worker ordering, and target-aware filtering in CI.
+
+### Packaging
+
+- Publish and verify the `turtles-windows-x86_64.exe` native release asset.
 
 ## 0.4.0 (candidate for review)
 

@@ -256,11 +256,19 @@ async test "mutation pool bounds concurrency and preserves discovery order" {
         if in_flight.val > max_in_flight.val {
           max_in_flight.val = in_flight.val
         }
-        // The `+` mutant is claimed first but sleeps longest, so completion
-        // order differs from claim order; the slot array still has to line
-        // results up with the mutation each run was built for.
+        // Wait for both classifiers to enter before measuring overlap. Worker
+        // workspace setup is filesystem work and can exceed a short sleep on
+        // a loaded Windows runner; the bound keeps a scheduling regression
+        // from hanging the test.
+        let overlap_started = @async.now()
+        while in_flight.val < 2 && @async.now() - overlap_started < 5000 {
+          @async.sleep(10)
+        }
         let first = mutation.original == "+"
-        @async.sleep(if first { 80 } else { 20 })
+        // Once both classifiers have entered, the `+` mutation takes
+        // substantially longer than `-`, forcing completion order to differ
+        // from discovery order without depending on workspace setup latency.
+        @async.sleep(if first { 500 } else { 20 })
         in_flight.val = in_flight.val - 1
         let outcome = if first { Killed } else { Survived }
         (outcome, None, None)

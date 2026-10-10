@@ -62,12 +62,17 @@ jobs:
             platform: linux-aarch64
           - os: macos-15
             platform: darwin-aarch64
+          - os: windows-2025
+            platform: windows-x86_64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Configure MSVC
+        if: startsWith(matrix.platform, 'windows-')
+        uses: ilammy/msvc-dev-cmd@v1
       - uses: hustcer/setup-moonbit@v1
       - name: Resolve dependencies
         run: |
@@ -89,9 +94,11 @@ jobs:
             exit 1
           fi
           mkdir -p release
-          cp -- "$binaries" "release/turtles-${{ matrix.platform }}"
-          chmod 755 "release/turtles-${{ matrix.platform }}"
-          test -s "release/turtles-${{ matrix.platform }}"
+          asset="release/turtles-${{ matrix.platform }}"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then asset="${asset}.exe"; fi
+          cp -- "$binaries" "$asset"
+          chmod 755 "$asset"
+          test -s "$asset"
       - name: Verify Darwin executable architecture
         if: matrix.platform == 'darwin-aarch64'
         run: file release/turtles-darwin-aarch64 | grep -q 'Mach-O 64-bit executable arm64'
@@ -99,7 +106,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          "./release/turtles-${{ matrix.platform }}" --help
+          asset="./release/turtles-${{ matrix.platform }}"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then asset="${asset}.exe"; fi
+          "$asset" --help
       - uses: actions/upload-artifact@v4
         with:
           name: native-${{ matrix.platform }}
@@ -132,7 +141,7 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
           set -euo pipefail
-          test "$(find release -type f | wc -l)" -eq 3
+          test "$(find release -type f | wc -l)" -eq 4
           verify_tag_args=()
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             verify_tag_args+=(--explicit-tag)

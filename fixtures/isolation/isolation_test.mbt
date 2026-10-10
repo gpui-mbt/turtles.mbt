@@ -7,8 +7,22 @@ test "sign" {
 ///|
 /// The suite runs a checked-in helper: it must stay executable in the
 /// temporary workspace.
+#cfg(not(platform="windows"))
 async test "helper script runs" {
   let (code, output) = @process.collect_stdout("./helper.sh", [])
+  assert_eq(code, 0)
+  assert_true(output.text().contains("helper-ok"))
+}
+
+///|
+/// Windows launches batch helpers through cmd.exe; this exercises copied
+/// fixture paths without relying on a Unix shell or executable mode bits.
+#cfg(platform="windows")
+async test "Windows helper script runs" {
+  let (code, output) = @process.collect_stdout(
+    "cmd.exe",
+    ["/d", "/c", "helper.cmd"],
+  )
   assert_eq(code, 0)
   assert_true(output.text().contains("helper-ok"))
 }
