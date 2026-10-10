@@ -48,7 +48,7 @@ async fn probe_group_timeout(temp : String) -> String? {
 
 ///|
 #cfg(platform="windows")
-async fn probe_group_timeout(_temp : String) -> String? {
+fn probe_group_timeout(_temp : String) -> String? {
   // Windows has a different built-in command named `timeout`; never invoke it
   // with GNU timeout's arguments or claim process-group cancellation support.
   None
