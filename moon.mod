@@ -1,10 +1,10 @@
 name = "f4ah6o/turtles"
 
-version = "0.4.2"
+version = "0.4.3"
 
 readme = "README.md"
 
-repository = "https://github.com/f4ah6o/turtles"
+repository = "https://github.com/gpui-mbt/turtles.mbt"
 
 license = "MIT"
 

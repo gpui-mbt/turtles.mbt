@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Deprecated
+
+### Removed
+
+### Security
+
+### Migration
+
+## 0.4.3 (candidate for review)
+
+### Improved
+
+- Recognize Homebrew's `gtimeout` for process-group cancellation when it is installed.
+
+### Fixed
+
+- Continue with direct-process cancellation when neither `timeout` nor `gtimeout` is executable, instead of aborting while probing for a helper. This lets native macOS runs proceed without GNU coreutils.
+- Classify GNU timeout's KILL expiry as `TIMEOUT` while preserving an ordinary child exit status of 137 as a command failure.
+
+### Packaging
+
+- Point the module metadata and GitHub install examples at the maintained `gpui-mbt/turtles.mbt` repository; the Mooncakes package remains `f4ah6o/turtles`.
+- Run native check, unit-test, and mutation-fixture coverage on Apple Silicon macOS, including the no-GNU-timeout runner path.
+- Verify that the Darwin release runner and packaged turtles executable are arm64 before uploading the artifact.
+
 ## 0.4.2
 
 ### Improved
