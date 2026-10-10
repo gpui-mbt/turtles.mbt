@@ -16,11 +16,60 @@ fn moon_args(args : Array[String], target : String?) -> Array[String] {
 }
 
 ///|
+async fn probe_group_timeout_from(
+  temp : String,
+  candidates : Array[String],
+) -> String? {
+  for executable in candidates {
+    let output = @process.redirect_to_file(temp + "/timeout-probe.log")
+    let exit_code = @async.with_timeout_opt(5000, () => {
+      @process.run(executable, ["--version"], stdout=output, stderr=output)
+    }) catch {
+      _ => None
+    }
+    if exit_code == Some(0) {
+      return Some(executable)
+    }
+  }
+  None
+}
+
+///|
+async fn probe_group_timeout(temp : String) -> String? {
+  // Prefer Homebrew's name so the Darwin CI path exercises the same helper
+  // users install there, even if a second coreutils alias is on PATH.
+  probe_group_timeout_from(temp, ["gtimeout", "timeout"])
+}
+
+///|
+/// GNU timeout can report a KILL timeout as exit 137, which is also a valid
+/// child exit status. Process::wait_pid returns negative signal numbers when
+/// the wrapper itself is signalled; for positive 137, require GNU timeout's
+/// verbose diagnostic before treating it as a timeout.
+fn group_timeout_result(
+  exit_code : Int?,
+  helper_sent_kill : Bool,
+) -> CommandResult {
+  match exit_code {
+    None | Some(124) => CommandTimeout
+    Some(0) => CommandSuccess
+    Some(code) if code < 0 => CommandTimeout
+    Some(137) if helper_sent_kill => CommandTimeout
+    Some(_) => CommandFailure
+  }
+}
+
+///|
+fn group_timeout_sent_kill(log : String) -> Bool {
+  log.contains("sending signal KILL to command")
+}
+
+///|
 async fn run_moon_command(
   root : String,
   args : Array[String],
   timeout_ms : Int,
-  group_kill : Bool,
+  timeout_command : String?,
   target? : String? = None,
 ) -> CommandResult {
   let command_args = moon_args(args, target)
@@ -29,25 +78,35 @@ async fn run_moon_command(
   // protocol and corrupts result parsing. The log lives next to the
   // workspace so the copied tree stays pristine.
   let output = @process.redirect_to_file(root + "-moon-output.log")
-  if group_kill {
+  if timeout_command is Some(timeout_executable) {
     // GNU `timeout` runs moon in a fresh process group and signals the
     // GROUP on expiry — hard-killing only the moon pid orphans its
     // moonc/test-exe children, which then burn CPU until reaped (observed
     // in dogfood: orphaned test exes ran for hours). `with_timeout_opt`
     // remains as a belt around `timeout` itself.
     let secs = timeout_ms.to_double() / 1000.0
-    let wrapped = ["--signal=KILL", secs.to_string(), "moon"]
+    let wrapped = ["--verbose", "--signal=KILL", secs.to_string(), "moon"]
     for arg in command_args {
       wrapped.push(arg)
     }
     let exit_code = @async.with_timeout_opt(timeout_ms + 5000, () => {
-      @process.run("timeout", wrapped, cwd=root, stdout=output, stderr=output)
+      @process.run(
+        timeout_executable,
+        wrapped,
+        cwd=root,
+        stdout=output,
+        stderr=output,
+      )
     })
-    return match exit_code {
-      None | Some(124) => CommandTimeout
-      Some(0) => CommandSuccess
-      Some(_) => CommandFailure
+    let helper_sent_kill = if exit_code == Some(137) {
+      let log = @fs.read_file(root + "-moon-output.log").text() catch {
+        _ => ""
+      }
+      group_timeout_sent_kill(log)
+    } else {
+      false
     }
+    return group_timeout_result(exit_code, helper_sent_kill)
   }
   let exit_code = @async.with_timeout_opt(timeout_ms, () => {
     @process.run(
@@ -73,11 +132,17 @@ async fn classify_mutant(
   check_timeout_ms : Int,
   test_timeout_ms : Int,
   plan : TestPlan?,
-  group_kill : Bool,
+  timeout_command : String?,
   target? : String? = None,
 ) -> (Outcome, Array[String]?, Array[Kill]?) {
   match
-    run_moon_command(root, ["check"], check_timeout_ms, group_kill, target~) {
+    run_moon_command(
+      root,
+      ["check"],
+      check_timeout_ms,
+      timeout_command,
+      target~,
+    ) {
     CommandFailure => return (Unviable, None, None)
     CommandTimeout => return (Timeout, None, None)
     CommandSuccess => ()
@@ -87,7 +152,8 @@ async fn classify_mutant(
     None => None
   }
   let args = mutant_test_args(packages)
-  match run_moon_command(root, args, test_timeout_ms, group_kill, target~) {
+  match
+    run_moon_command(root, args, test_timeout_ms, timeout_command, target~) {
     CommandSuccess => (Survived, packages, None)
     CommandFailure => (Killed, packages, last_test_failures(root))
     CommandTimeout => (Timeout, packages, None)
@@ -104,12 +170,12 @@ async fn validate_workspace(
   workspace : String,
   reference : String,
   timeout_ms : Int,
-  group_kill : Bool,
+  timeout_command : String?,
   target? : String? = None,
 ) -> (Int64, Int64) {
   let check_started = @async.now()
   match
-    run_moon_command(workspace, ["check"], timeout_ms, group_kill, target~) {
+    run_moon_command(workspace, ["check"], timeout_ms, timeout_command, target~) {
     CommandSuccess => ()
     CommandFailure =>
       fail(
@@ -123,7 +189,7 @@ async fn validate_workspace(
     workspace,
     reference,
     timeout_ms,
-    group_kill,
+    timeout_command,
     target~,
   )
   (check_ms, test_ms)
@@ -141,7 +207,7 @@ async fn baseline_test_run(
   workspace : String,
   reference : String,
   timeout_ms : Int,
-  group_kill : Bool,
+  timeout_command : String?,
   target? : String? = None,
 ) -> Int64 {
   let test_args = mutant_test_args(None)
@@ -151,7 +217,7 @@ async fn baseline_test_run(
     workspace,
     test_args,
     timeout_ms,
-    group_kill,
+    timeout_command,
     target~,
   )
   let first_ms = @async.now() - first_started
@@ -169,7 +235,7 @@ async fn baseline_test_run(
     workspace,
     test_args,
     timeout_ms,
-    group_kill,
+    timeout_command,
     target~,
   )
   let second_ms = @async.now() - second_started
@@ -516,19 +582,16 @@ async fn run_mutations(
     copy_tree(reference, reference, baseline)
     println("Baseline: moon check + moon test on pristine copy ...")
     let started = @async.now()
-    // Probe for GNU `timeout`: present everywhere on Linux coreutils; on
-    // systems without it we keep the single-pid hard-kill path (children
-    // of a killed moon may then be orphaned until they exit).
-    let probe_out = @process.redirect_to_file(temp + "/timeout-probe.log")
-    let group_kill = @async.with_timeout_opt(5000, () => {
-        @process.run("timeout", ["--version"], stdout=probe_out)
-      }) ==
-      Some(0)
+    // GNU coreutils uses `timeout` on Linux and `gtimeout` when installed
+    // with Homebrew on macOS. Missing executables raise OSError from
+    // @process.run, so the probe must treat that as an unavailable helper
+    // and leave the native single-pid cancellation path usable.
+    let timeout_command = probe_group_timeout(temp)
     let (baseline_check_ms, baseline_test_ms) = validate_workspace(
       baseline,
       reference,
       timeout_ms * 10,
-      group_kill,
+      timeout_command,
       target~,
     )
     let baseline_duration_ms = @async.now() - started
@@ -550,7 +613,7 @@ async fn run_mutations(
         check_timeout_ms,
         test_timeout_ms,
         plan,
-        group_kill,
+        timeout_command,
         target~,
       )
     }
@@ -579,7 +642,7 @@ async fn run_mutations(
                 factor,
                 check_timeout_ms,
                 test_timeout_ms,
-                group_kill,
+                timeout_command,
                 target~,
               )
             None => ()
@@ -591,7 +654,7 @@ async fn run_mutations(
               results,
               index,
               test_timeout_ms,
-              group_kill,
+              timeout_command,
               target~,
             )
           }

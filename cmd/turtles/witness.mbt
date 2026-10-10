@@ -240,7 +240,7 @@ async fn run_pbt_witness(
   results : Array[MutationResult],
   index : ModuleIndex,
   test_timeout_ms : Int,
-  group_kill : Bool,
+  timeout_command : String?,
   target? : String? = None,
 ) -> Unit {
   let manifest = Ref(snapshot_workspace(workspace))
@@ -278,7 +278,7 @@ async fn run_pbt_witness(
     }
     results[i] = witness_one(
       workspace, entry, result, helper, guard_name, witness_name, test_timeout_ms,
-      group_kill, target,
+      timeout_command, target,
     )
     sweep_workspace(workspace, reference, manifest.val) catch {
       _ => manifest.val = rebuild_workspace(workspace, reference)
@@ -299,7 +299,7 @@ async fn witness_one(
   guard_name : String,
   witness_name : String,
   test_timeout_ms : Int,
-  group_kill : Bool,
+  timeout_command : String?,
   target : String?,
 ) -> MutationResult {
   let harness_error = {
@@ -323,7 +323,13 @@ async fn witness_one(
     return harness_error
   }
   match
-    run_moon_command(workspace, ["check"], test_timeout_ms, group_kill, target~) {
+    run_moon_command(
+      workspace,
+      ["check"],
+      test_timeout_ms,
+      timeout_command,
+      target~,
+    ) {
     CommandSuccess => ()
     _ => return harness_error
   }
@@ -332,7 +338,7 @@ async fn witness_one(
       workspace,
       mutant_test_args(result.packages),
       test_timeout_ms,
-      group_kill,
+      timeout_command,
       target~,
     ) {
     CommandSuccess => WitnessNone

@@ -68,6 +68,8 @@ jobs:
           assert report["summary"]["timeout"] == 0
           assert all("duration_ms" in mutant for mutant in report["mutants"])
           PY
+      - name: Verify GNU timeout classification and iteration
+        run: python3 scripts/timeout_smoke.py
       - name: Run turtles against isolation fixture
         run: |
           report="$RUNNER_TEMP/turtles-isolation-report.json"
@@ -350,3 +352,61 @@ jobs:
           PY
       - name: Binary self-verification e2e
         run: sh scripts/self_e2e.sh
+
+  macos-native:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify Apple Silicon runner
+        run: test "$(uname -m)" = arm64
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Update dependencies
+        run: moon update
+      - name: Check formatting
+        run: moon fmt --check
+      - name: Assert version consistency
+        run: |
+          mod_version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' moon.mod)
+          cli_version=$(sed -n 's/.*turtles_version *: *String *= *"\(.*\)".*/\1/p' cmd/turtles/config.mbt)
+          test "$mod_version" = "$cli_version"
+      - name: Check native target
+        run: moon check --target native --deny-warn
+      - name: Install GNU coreutils for timeout regression
+        run: |
+          brew install coreutils
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          test -x /opt/homebrew/bin/gtimeout
+      - name: Unit tests on Darwin
+        run: moon test --target native
+      - name: Verify Homebrew gtimeout classification and iteration
+        run: python3 scripts/timeout_smoke.py
+      - name: Run native mutation fixture without GNU timeout
+        shell: bash
+        run: |
+          set -euo pipefail
+          fallback_path="$HOME/.moon/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+          if PATH="$fallback_path" /bin/sh -c 'command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1'; then
+            echo "expected the macOS single-process timeout fallback to be exercised" >&2
+            exit 1
+          fi
+          report="$RUNNER_TEMP/turtles-report.json"
+          PATH="$fallback_path" moon run cmd/turtles -- --dir fixtures/basic --timeout 30 --json "$report"
+          python3 - "$report" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              report = json.load(handle)
+
+          assert report["schema"] == 3
+          assert report["turtles_version"] == "0.4.2"
+          assert len(report["mutants"]) == 6
+          assert report["summary"]["killed"] == 6
+          assert report["summary"]["survived"] == 0
+          assert report["summary"]["timeout"] == 0
+          assert all("duration_ms" in mutant for mutant in report["mutants"])
+          PY

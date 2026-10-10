@@ -1,4 +1,72 @@
 ///|
+// The timeout probe must survive an absent `timeout` executable, then select
+// the next candidate. Absolute paths make this test independent of PATH.
+#cfg(all(target="native", not(platform="windows")))
+async test "missing group-timeout executable falls through to the next candidate" {
+  let temp = @fs.tmpdir(prefix="turtles-timeout-probe")
+  @async.with_task_group(group => {
+    group.add_defer(() => @fs.rmdir(temp, recursive=true))
+    let missing = path_join(temp, "missing-timeout")
+    let gtimeout = path_join(temp, "gtimeout")
+    @fs.write_file(gtimeout, "#!/bin/sh\nexit 0\n")
+    @fs.chmod(gtimeout, 0o755)
+    let found = probe_group_timeout_from(temp, [missing, gtimeout])
+    assert_eq(found, Some(gtimeout))
+  })
+}
+
+///|
+/// Exercise the real GNU helper when available. A KILL timeout and a child
+/// that exits 137 can have the same shell status, so the helper diagnostic
+/// must distinguish them before classification.
+#cfg(all(target="native", not(platform="windows")))
+async test "GNU group timeout distinguishes expiry from child exit 137" {
+  let temp = @fs.tmpdir(prefix="turtles-timeout-result")
+  @async.with_task_group(group => {
+    group.add_defer(() => @fs.rmdir(temp, recursive=true))
+    match
+      probe_group_timeout_from(temp, [
+        "gtimeout", "/opt/homebrew/bin/gtimeout", "timeout",
+      ]) {
+      Some(executable) => {
+        let expired_log = temp + "/expired.log"
+        let expired_output = @process.redirect_to_file(expired_log)
+        let expired = @process.run(
+          executable,
+          ["--verbose", "--signal=KILL", "0.1", "/bin/sleep", "5"],
+          stdout=expired_output,
+          stderr=expired_output,
+        )
+        let expiry_text = @fs.read_file(expired_log).text()
+        let expired_by_helper = group_timeout_sent_kill(expiry_text)
+        assert_true(
+          group_timeout_result(Some(expired), expired_by_helper) ==
+          CommandTimeout,
+        )
+        let child_log = temp + "/child-137.log"
+        let child_output = @process.redirect_to_file(child_log)
+        let child_exit = @process.run(
+          executable,
+          ["--verbose", "--signal=KILL", "5", "/bin/sh", "-c", "exit 137"],
+          stdout=child_output,
+          stderr=child_output,
+        )
+        assert_eq(child_exit, 137)
+        let child_text = @fs.read_file(child_log).text()
+        assert_true(
+          group_timeout_result(
+            Some(child_exit),
+            group_timeout_sent_kill(child_text),
+          ) ==
+          CommandFailure,
+        )
+      }
+      None => println("Skipping GNU timeout regression: helper is unavailable")
+    }
+  })
+}
+
+///|
 async fn write_order_fixture(dir : String) -> Unit {
   @fs.write_file(
     path_join(dir, "moon.mod"),
@@ -411,7 +479,7 @@ async test "pristine workspace validation failure aborts as a setup error" {
     let workspace = path_join(temp, "workspace")
     @fs.mkdir(workspace, recursive=true)
     let mut raised = false
-    ignore(validate_workspace(workspace, workspace, 30000, false)) catch {
+    ignore(validate_workspace(workspace, workspace, 30000, None)) catch {
       _ => raised = true
     }
     assert_true(raised)

@@ -75,6 +75,9 @@ jobs:
           moon install
       - name: Build MoonBit native executable
         run: moon build cmd/turtles --target native --release
+      - name: Verify Darwin runner architecture
+        if: matrix.platform == 'darwin-aarch64'
+        run: test "$(uname -m)" = arm64
       - name: Package raw release asset
         shell: bash
         run: |
@@ -89,6 +92,9 @@ jobs:
           cp -- "$binaries" "release/turtles-${{ matrix.platform }}"
           chmod 755 "release/turtles-${{ matrix.platform }}"
           test -s "release/turtles-${{ matrix.platform }}"
+      - name: Verify Darwin executable architecture
+        if: matrix.platform == 'darwin-aarch64'
+        run: file release/turtles-darwin-aarch64 | grep -q 'Mach-O 64-bit executable arm64'
       - name: Smoke check
         shell: bash
         run: |

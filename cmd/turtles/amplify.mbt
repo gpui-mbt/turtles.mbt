@@ -260,7 +260,7 @@ async fn run_pbt_amplify(
   factor : Int,
   check_timeout_ms : Int,
   test_timeout_ms : Int,
-  group_kill : Bool,
+  timeout_command : String?,
   target? : String? = None,
 ) -> Unit {
   let manifest = Ref(snapshot_workspace(workspace))
@@ -276,7 +276,7 @@ async fn run_pbt_amplify(
         workspace,
         ["check"],
         check_timeout_ms,
-        group_kill,
+        timeout_command,
         target~,
       ) {
       CommandSuccess =>
@@ -284,7 +284,7 @@ async fn run_pbt_amplify(
           workspace,
           mutant_test_args(result.packages),
           test_timeout_ms * factor,
-          group_kill,
+          timeout_command,
           target~,
         )
         is CommandSuccess
@@ -312,7 +312,7 @@ async fn run_pbt_amplify(
         workspace,
         ["check"],
         check_timeout_ms,
-        group_kill,
+        timeout_command,
         target~,
       ) {
       CommandSuccess =>
@@ -320,7 +320,7 @@ async fn run_pbt_amplify(
           workspace,
           mutant_test_args(result.packages),
           test_timeout_ms * factor,
-          group_kill,
+          timeout_command,
           target~,
         )
         is CommandFailure
