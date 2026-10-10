@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.2
+
+### Improved
+
+- Normalize module-relative paths before package ownership and target-plan lookups so Windows separators do not hide nested packages.
+- Exercise native Windows fixture mutation, parallel worker ordering, and target-aware filtering in CI.
+
+### Packaging
+
+- Publish and verify the `turtles-windows-x86_64.exe` native release asset.
+
 ## 0.4.0 (candidate for review)
 
 ### Added

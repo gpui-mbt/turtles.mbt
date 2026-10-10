@@ -599,6 +599,7 @@ async fn collect_pkg_dirs(root : String) -> Map[String, Bool] {
 /// Owning package dir of a module-relative source path — the deepest
 /// manifest dir containing it.
 fn pkg_dir_of(pkg_dirs : Map[String, Bool], path : String) -> String {
+  let path = path.replace_all(old="\\", new="/")
   let mut best = "."
   for dir, _ in pkg_dirs {
     let contains = if dir == "." { true } else { path.has_prefix(dir + "/") }

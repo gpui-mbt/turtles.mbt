@@ -27,7 +27,7 @@ moon install https://github.com/f4ah6o/turtles.git cmd/turtles --branch main
 Install from the matching source tag after it is created:
 
 ```sh
-moon install https://github.com/f4ah6o/turtles.git cmd/turtles --tag v0.4.1
+moon install https://github.com/f4ah6o/turtles.git cmd/turtles --tag v0.4.2
 ```
 
 ### From a local clone
@@ -39,7 +39,7 @@ moon install ./cmd/turtles
 ## First run in 30 seconds
 
 ```sh
-turtles --version          # turtles 0.4.1 for this source release
+turtles --version          # turtles 0.4.2 for this source release
 turtles --help
 
 cd path/to/your-moonbit-module
@@ -138,7 +138,7 @@ Every run writes a schema-`3` report and per-survivor unified diffs to `<dir>/.t
 {
   "schema": 3,
   "module": "/abs/path",
-  "turtles_version": "0.4.1",
+  "turtles_version": "0.4.2",
   "moon_version": "moon 0.1.20260920 (914d7da 2026-09-20) ~/.moon/bin/moon",
   "target": "native",
   "inactive_mutants": 1,
@@ -276,16 +276,17 @@ JUnit reports, richer survivor context, and smarter default test selection are s
 ## Versioned native releases
 
 Edit the `version` field in `moon.mod` to the intended SemVer version
-(e.g., `0.4.0` to `0.4.1`) and merge that change into `main`.
+(e.g., `0.4.1` to `0.4.2`) and merge that change into `main`.
 The release workflow compares the previous and new **version values**, not
 just the file modification date. On a version increase it validates
-version consistency, builds three native platforms, then creates the
+version consistency, builds four native platforms, then creates the
 `vX.Y.Z` tag and GitHub Release for the matching commit.
 Other changes to `moon.mod` do not publish. Version downgrades fail.
 
 The raw executable assets are named `turtles-linux-x86_64`,
-`turtles-linux-aarch64`, and `turtles-darwin-aarch64`. GitHub exposes a
-SHA-256 digest for each uploaded asset.
+`turtles-linux-aarch64`, `turtles-darwin-aarch64`, and
+`turtles-windows-x86_64.exe`. GitHub exposes a SHA-256 digest for each
+uploaded asset.
 
 An explicitly pushed `vX.Y.Z` tag remains supported only when the tag
 matches `moon.mod`; the workflow never edits source versions or bumps

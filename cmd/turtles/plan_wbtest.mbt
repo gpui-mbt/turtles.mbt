@@ -136,6 +136,10 @@ test "normalize_plan_source resolves relative and absolute in-module paths" {
     normalize_plan_source(root, "/root/mod/lib/a.mbt"),
     Some("lib/a.mbt"),
   )
+  assert_eq(
+    normalize_plan_source(root, "\\root\\mod\\lib\\a.mbt"),
+    Some("lib/a.mbt"),
+  )
   assert_eq(normalize_plan_source(root, "/root/mod/a.mbt"), Some("a.mbt"))
   // Generated, vendored, external, and out-of-module sources drop out.
   assert_eq(normalize_plan_source(root, "./_build/native/x.mbt"), None)

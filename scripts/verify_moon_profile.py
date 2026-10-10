@@ -120,6 +120,18 @@ def load_profile(path):
 
 
 def terminate(proc):
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        # Windows can terminate this direct child, but does not offer the
+        # POSIX process-group semantics used by this verifier. Descendant
+        # process-tree cleanup is not claimed on Windows.
+        proc.kill()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+        return
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
             os.killpg(proc.pid, sig)
@@ -136,7 +148,14 @@ def run(argv, cwd, env, log, timeout):
     with Path(log).open("x") as stream:
         stream.write("COMMAND " + json.dumps(argv) + "\n")
         stream.flush()
-        proc = subprocess.Popen(argv, cwd=cwd, env=env, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+        proc = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            env=env,
+            stdout=stream,
+            stderr=subprocess.STDOUT,
+            start_new_session=os.name != "nt",
+        )
         try:
             code = proc.wait(timeout=timeout)
             timed_out = False

@@ -16,6 +16,26 @@ fn moon_args(args : Array[String], target : String?) -> Array[String] {
 }
 
 ///|
+#cfg(not(platform="windows"))
+async fn supports_group_kill(temp : String) -> Bool {
+  // GNU `timeout` provides process-group cleanup on Unix. If it is not
+  // installed, commands still use the direct-process hard-cancel path.
+  let probe_out = @process.redirect_to_file(temp + "/timeout-probe.log")
+  @async.with_timeout_opt(5000, () => {
+    @process.run("timeout", ["--version"], stdout=probe_out)
+  }) ==
+  Some(0)
+}
+
+///|
+#cfg(platform="windows")
+fn supports_group_kill(_temp : String) -> Bool {
+  // Windows ships a different command named `timeout`; never run its
+  // incompatible `/T` parser with GNU timeout arguments.
+  false
+}
+
+///|
 async fn run_moon_command(
   root : String,
   args : Array[String],
@@ -516,14 +536,7 @@ async fn run_mutations(
     copy_tree(reference, reference, baseline)
     println("Baseline: moon check + moon test on pristine copy ...")
     let started = @async.now()
-    // Probe for GNU `timeout`: present everywhere on Linux coreutils; on
-    // systems without it we keep the single-pid hard-kill path (children
-    // of a killed moon may then be orphaned until they exit).
-    let probe_out = @process.redirect_to_file(temp + "/timeout-probe.log")
-    let group_kill = @async.with_timeout_opt(5000, () => {
-        @process.run("timeout", ["--version"], stdout=probe_out)
-      }) ==
-      Some(0)
+    let group_kill = supports_group_kill(temp)
     let (baseline_check_ms, baseline_test_ms) = validate_workspace(
       baseline,
       reference,

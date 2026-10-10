@@ -36,6 +36,7 @@ fn split_args(line : String) -> Array[String] {
 /// `./_build/<backend>/<profile>/<kind>/<pkg-path>/<name>` → `pkg-path`.
 /// Returns None for paths outside `_build` (external deps, $MOON_HOME).
 fn artifact_pkg_path(path : String) -> String? {
+  let path = path.replace_all(old="\\", new="/")
   let path = if path.has_prefix("./") { path[2:].to_owned() } else { path }
   let parts = path.split("/").collect()
   if parts.length() < 4 || parts[0].to_owned() != "_build" {
@@ -409,11 +410,14 @@ fn normalize_plan_source(root : String, raw : String) -> String? {
   let rel = if path.has_prefix("/") ||
     (path.length() > 2 && path.find(":/") == Some(1)) {
     // Absolute paths resolve against the module root; escaping it drops out.
-    @path.Path(path).relative(base=@path.Path(root)).to_string()
+    @path.Path(path)
+    .relative(base=@path.Path(root))
+    .to_string()
+    .replace_all(old="\\", new="/")
   } else {
     path
   }
-  let mut cleaned = rel
+  let mut cleaned = rel.replace_all(old="\\", new="/")
   while cleaned.has_prefix("./") {
     cleaned = cleaned[2:].to_owned()
   }

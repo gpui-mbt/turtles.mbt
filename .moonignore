@@ -1,2 +1,6 @@
 # Development-only issue tracking; not part of the published artifact.
 issues/
+
+# Python test and CLI caches are generated during CI and local checks.
+**/__pycache__/
+**/*.py[cod]
