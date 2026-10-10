@@ -171,71 +171,92 @@ def run_timeout_smoke(
     if powershell is None:
         raise RuntimeError("powershell.exe is required for the Windows timeout check")
 
-    command = [
-        turtles, "--dir", "fixtures/timeout",
-        "--target", "native", "--timeout", "1", "--json", str(report),
-    ]
-    process = subprocess.Popen(
-        command,
-        cwd=ROOT,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
     expected_turtles = str(Path(turtles).resolve())
     expected_moon = str(Path(moon).resolve())
-    seen_children: set[ProcessIdentity] = set()
-    root_identity: ProcessIdentity | None = None
-    deadline = time.monotonic() + 180
-    try:
-        while True:
-            snapshot = windows_processes(powershell)
-            if root_identity is None:
-                root_identity = find_process_identity(
-                    snapshot,
-                    process.pid,
-                    expected_turtles,
-                    "--dir fixtures/timeout",
-                )
-            if root_identity is not None:
-                seen_children.update(
-                    process_children(snapshot, root_identity, expected_moon)
-                )
-            if process.poll() is not None:
-                break
-            if time.monotonic() >= deadline:
-                raise RuntimeError(
-                    "timeout fixture exceeded the 180-second smoke deadline"
-                )
-            time.sleep(0.1)
-        output, _ = process.communicate(timeout=30)
-    except BaseException:
-        if process.poll() is None:
-            process.kill()
-        process.communicate(timeout=30)
-        raise
-
-    if root_identity is None:
-        raise RuntimeError("timeout smoke never observed its turtles.exe process")
-    require_observed_children(seen_children)
-    if process.returncode != 1:
-        raise RuntimeError(
-            f"timeout fixture: expected exit 1, got {process.returncode}\n{output}"
+    output_dir = report.with_name(f"{report.stem}-output")
+    for attempt in (1, 2):
+        attempt_report = (
+            report
+            if attempt == 1
+            else report.with_name(f"{report.stem}-iterate{report.suffix}")
         )
-    timeout_report = read_report(report)
-    assert timeout_report["summary"]["timeout"] == 1, timeout_report["summary"]
+        command = [
+            turtles, "--dir", "fixtures/timeout",
+            "--target", "native", "--timeout", "1",
+            "--fail-under", "1", "--iterate",
+            "--output-dir", str(output_dir), "--json", str(attempt_report),
+        ]
+        process = subprocess.Popen(
+            command,
+            cwd=ROOT,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        seen_children: set[ProcessIdentity] = set()
+        root_identity: ProcessIdentity | None = None
+        deadline = time.monotonic() + 180
+        try:
+            while True:
+                snapshot = windows_processes(powershell)
+                if root_identity is None:
+                    root_identity = find_process_identity(
+                        snapshot,
+                        process.pid,
+                        expected_turtles,
+                        "--dir fixtures/timeout",
+                    )
+                if root_identity is not None:
+                    seen_children.update(
+                        process_children(snapshot, root_identity, expected_moon)
+                    )
+                if process.poll() is not None:
+                    break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        f"timeout fixture attempt {attempt} exceeded the 180-second smoke deadline"
+                    )
+                time.sleep(0.1)
+            output, _ = process.communicate(timeout=30)
+        except BaseException:
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=30)
+            raise
 
-    cleanup_deadline = time.monotonic() + 8
-    live_processes = {process_identity(row) for row in windows_processes(powershell)}
-    remaining = seen_children & live_processes
-    while remaining and time.monotonic() < cleanup_deadline:
-        time.sleep(0.2)
-        live_processes = {process_identity(row) for row in windows_processes(powershell)}
+        if root_identity is None:
+            raise RuntimeError(
+                f"timeout smoke attempt {attempt} never observed its turtles.exe process"
+            )
+        require_observed_children(seen_children)
+        if process.returncode != 1:
+            raise RuntimeError(
+                f"timeout fixture attempt {attempt}: expected fail-under exit 1, "
+                f"got {process.returncode}\n{output}"
+            )
+        timeout_report = read_report(attempt_report)
+        summary = timeout_report["summary"]
+        assert summary["timeout"] == 1, summary
+        assert summary["score"] == 0, summary
+        # TIMEOUT verdicts must never be reused, including on Windows' direct
+        # process-cancellation path.
+        assert summary["reused"] == 0, summary
+
+        cleanup_deadline = time.monotonic() + 8
+        live_processes = {
+            process_identity(row) for row in windows_processes(powershell)
+        }
         remaining = seen_children & live_processes
-    require_children_exited(seen_children, live_processes)
+        while remaining and time.monotonic() < cleanup_deadline:
+            time.sleep(0.2)
+            live_processes = {
+                process_identity(row) for row in windows_processes(powershell)
+            }
+            remaining = seen_children & live_processes
+        require_children_exited(seen_children, live_processes)
 
 
 def build_turtles(moon: str, env: dict[str, str]) -> Path:
@@ -345,7 +366,10 @@ def main() -> int:
 
         run_timeout_smoke(turtles, moon, temp / "timeout-report.json", env)
 
-    print("Windows native subprocess, temp workspace, parallel, and target smoke checks passed")
+    print(
+        "Windows native subprocess, timeout iteration/cancellation, temp workspace, "
+        "parallel, and target smoke checks passed"
+    )
     return 0
 
 
