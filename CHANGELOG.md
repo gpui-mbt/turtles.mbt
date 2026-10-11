@@ -16,7 +16,7 @@
 
 ### Migration
 
-## 0.4.4 (candidate for review)
+## 0.4.4
 
 ### Fixed
 
