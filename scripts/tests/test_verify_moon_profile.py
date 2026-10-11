@@ -1,6 +1,5 @@
 """Offline adversarial parser/provenance tests, not solver qualification evidence."""
 import copy
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -10,9 +9,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-SPEC = importlib.util.spec_from_file_location("verify_moon_profile", Path(__file__).parents[1] / "verify_moon_profile.py")
-V = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(V)
+from scripts import verify_moon_profile as V
 
 
 class ProfileTests(unittest.TestCase):
@@ -82,6 +79,42 @@ class ProfileTests(unittest.TestCase):
         row = V.run([sys.executable, "-c", "import time;time.sleep(20)"], self.root, {}, self.root / "timeout.log", .05)
         self.assertTrue(row["timed_out"])
         self.assertLess(time.monotonic() - started, 5)
+
+    def test_process_timeout_terminates_owned_descendants(self):
+        child_ready = self.root / "child-ready.txt"
+        child_survived = self.root / "child-survived.txt"
+        child_code = (
+            "from pathlib import Path; import time; "
+            f"Path({str(child_ready)!r}).write_text('ready'); "
+            "time.sleep(1.3); "
+            f"Path({str(child_survived)!r}).write_text('survived')"
+        )
+        parent_code = "\n".join(
+            (
+                "import subprocess,sys,time",
+                "from pathlib import Path",
+                "subprocess.Popen([sys.executable, '-c', sys.argv[1]])",
+                "ready=Path(sys.argv[2])",
+                "deadline=time.monotonic()+3",
+                "while not ready.exists() and time.monotonic()<deadline:",
+                "    time.sleep(.01)",
+                "time.sleep(20)",
+            )
+        )
+        report = V.run(
+            [sys.executable, "-c", parent_code, child_code, str(child_ready)],
+            self.root,
+            {},
+            self.root / "descendant-timeout.log",
+            0.7,
+        )
+        self.assertTrue(report["timed_out"])
+        self.assertTrue(child_ready.exists(), "the test child must actually start")
+        time.sleep(0.9)
+        self.assertFalse(
+            child_survived.exists(),
+            "a timed-out command must not leave its owned descendant running",
+        )
 
     def test_source_copy_rejects_external_links_and_preserves_mode_where_supported(self):
         source = self.root / "source"
