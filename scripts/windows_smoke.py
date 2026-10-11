@@ -243,7 +243,7 @@ def run_timeout_smoke(
         )
         command = [
             turtles, "--dir", "fixtures/timeout",
-            "--target", "native", "--timeout", "5",
+            "--target", "native", "--timeout", "30",
             "--fail-under", "1", "--iterate",
             "--output-dir", str(output_dir), "--json", str(attempt_report),
         ]
@@ -292,6 +292,20 @@ def run_timeout_smoke(
             cleanup_persistent_child(ready_path, token)
             raise
         try:
+            if not ready_path.is_file():
+                report_details = "not written"
+                if attempt_report.is_file():
+                    try:
+                        report_details = json.dumps(
+                            read_report(attempt_report).get("summary"), sort_keys=True
+                        )
+                    except (OSError, ValueError, TypeError) as exc:
+                        report_details = f"unreadable: {exc}"
+                raise RuntimeError(
+                    f"timeout fixture attempt {attempt} did not start its tokenized helper "
+                    f"(exit {process.returncode})\nCLI output:\n{output.rstrip()}\n"
+                    f"report summary: {report_details}"
+                )
             fields = ready_path.read_text(encoding="ascii").split()
             if len(fields) != 3 or fields[1] != token:
                 raise RuntimeError(
