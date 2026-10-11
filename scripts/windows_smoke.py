@@ -148,18 +148,62 @@ def process_children(
     }
 
 
+def process_descendant_depths(
+    processes: list[dict], root_identity: ProcessIdentity
+) -> dict[ProcessIdentity, int]:
+    by_pid = {int(row["ProcessId"]): row for row in processes}
+    root = by_pid.get(root_identity[0])
+    if root is None or process_identity(root) != root_identity:
+        return {}
+
+    children_by_parent: dict[int, list[dict]] = {}
+    for row in processes:
+        parent = int(row["ParentProcessId"] or 0)
+        children_by_parent.setdefault(parent, []).append(row)
+
+    descendants: dict[ProcessIdentity, int] = {}
+    frontier = [(root_identity[0], root_identity[4], 0)]
+    visited = {root_identity[0]}
+    while frontier:
+        next_frontier: list[tuple[int, str, int]] = []
+        for parent_pid, parent_created, parent_depth in frontier:
+            for row in children_by_parent.get(parent_pid, []):
+                identity = process_identity(row)
+                # WMI reports the parent PID but not its creation time. A
+                # child older than the current parent with that PID belongs
+                # to an earlier process and must not be attributed to it.
+                if identity[4] < parent_created:
+                    continue
+                depth = parent_depth + 1
+                descendants[identity] = depth
+                child_pid = identity[0]
+                if child_pid not in visited:
+                    visited.add(child_pid)
+                    next_frontier.append((child_pid, identity[4], depth))
+        frontier = next_frontier
+    return descendants
+
+
 def require_observed_children(children: set[ProcessIdentity]) -> None:
     if not children:
         raise RuntimeError("timeout smoke observed no direct nested moon.exe children")
 
 
-def require_children_exited(
+def require_observed_nested_processes(
+    children: set[ProcessIdentity], descendants: dict[ProcessIdentity, int]
+) -> None:
+    require_observed_children(children)
+    if not any(depth >= 2 for depth in descendants.values()):
+        raise RuntimeError("timeout smoke observed no descendants beneath moon.exe")
+
+
+def require_descendants_exited(
     observed: set[ProcessIdentity], live: set[ProcessIdentity]
 ) -> None:
     remaining = observed & live
     if remaining:
         raise RuntimeError(
-            "timed-out direct subprocess children remain alive: "
+            "timed-out subprocess descendants remain alive: "
             f"{sorted(pid for pid, _, _, _, _ in remaining)}"
         )
 
@@ -182,7 +226,7 @@ def run_timeout_smoke(
         )
         command = [
             turtles, "--dir", "fixtures/timeout",
-            "--target", "native", "--timeout", "1",
+            "--target", "native", "--timeout", "5",
             "--fail-under", "1", "--iterate",
             "--output-dir", str(output_dir), "--json", str(attempt_report),
         ]
@@ -197,6 +241,7 @@ def run_timeout_smoke(
             errors="replace",
         )
         seen_children: set[ProcessIdentity] = set()
+        seen_descendant_depths: dict[ProcessIdentity, int] = {}
         root_identity: ProcessIdentity | None = None
         deadline = time.monotonic() + 180
         try:
@@ -213,6 +258,12 @@ def run_timeout_smoke(
                     seen_children.update(
                         process_children(snapshot, root_identity, expected_moon)
                     )
+                    for identity, depth in process_descendant_depths(
+                        snapshot, root_identity
+                    ).items():
+                        seen_descendant_depths[identity] = max(
+                            depth, seen_descendant_depths.get(identity, 0)
+                        )
                 if process.poll() is not None:
                     break
                 if time.monotonic() >= deadline:
@@ -231,7 +282,9 @@ def run_timeout_smoke(
             raise RuntimeError(
                 f"timeout smoke attempt {attempt} never observed its turtles.exe process"
             )
-        require_observed_children(seen_children)
+        require_observed_nested_processes(
+            seen_children, seen_descendant_depths
+        )
         if process.returncode != 1:
             raise RuntimeError(
                 f"timeout fixture attempt {attempt}: expected fail-under exit 1, "
@@ -249,14 +302,15 @@ def run_timeout_smoke(
         live_processes = {
             process_identity(row) for row in windows_processes(powershell)
         }
-        remaining = seen_children & live_processes
+        seen_descendants = set(seen_descendant_depths)
+        remaining = seen_descendants & live_processes
         while remaining and time.monotonic() < cleanup_deadline:
             time.sleep(0.2)
             live_processes = {
                 process_identity(row) for row in windows_processes(powershell)
             }
-            remaining = seen_children & live_processes
-        require_children_exited(seen_children, live_processes)
+            remaining = seen_descendants & live_processes
+        require_descendants_exited(seen_descendants, live_processes)
 
 
 def build_turtles(moon: str, env: dict[str, str]) -> Path:

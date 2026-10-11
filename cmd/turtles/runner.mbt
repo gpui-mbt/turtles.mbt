@@ -50,7 +50,8 @@ async fn probe_group_timeout(temp : String) -> String? {
 #cfg(platform="windows")
 fn probe_group_timeout(_temp : String) -> String? {
   // Windows has a different built-in command named `timeout`; never invoke it
-  // with GNU timeout's arguments or claim process-group cancellation support.
+  // with GNU timeout's arguments. The Windows runner terminates timed-out
+  // process trees through taskkill instead.
   None
 }
 
@@ -59,6 +60,7 @@ fn probe_group_timeout(_temp : String) -> String? {
 /// child exit status. Process::wait_pid returns negative signal numbers when
 /// the wrapper itself is signalled; for positive 137, require GNU timeout's
 /// verbose diagnostic before treating it as a timeout.
+#cfg(not(platform="windows"))
 fn group_timeout_result(
   exit_code : Int?,
   helper_sent_kill : Bool,
@@ -73,11 +75,13 @@ fn group_timeout_result(
 }
 
 ///|
+#cfg(not(platform="windows"))
 fn group_timeout_sent_kill(log : String) -> Bool {
   log.contains("sending signal KILL to command")
 }
 
 ///|
+#cfg(not(platform="windows"))
 async fn run_moon_command(
   root : String,
   args : Array[String],
@@ -135,6 +139,101 @@ async fn run_moon_command(
     None => CommandTimeout
     Some(0) => CommandSuccess
     Some(_) => CommandFailure
+  }
+}
+
+///|
+#cfg(platform="windows")
+async fn windows_process_pid_listed(
+  root : String,
+  tasklist : String,
+  pid : Int,
+) -> Bool {
+  let output_path = root + "-timeout-processes.log"
+  let output = @process.redirect_to_file(output_path)
+  let status = @process.run(
+    tasklist,
+    ["/FI", "PID eq \{pid}", "/FO", "CSV", "/NH"],
+    stdout=output,
+    stderr=output,
+  )
+  if status != 0 {
+    let detail = @fs.read_file(output_path).text() catch {
+      _ => "no tasklist diagnostic was written"
+    }
+    fail("Windows could not verify timed-out process PID \{pid}: \{detail}")
+  }
+  let detail = @fs.read_file(output_path).text() catch {
+    _ => fail("Windows could not read tasklist output for PID \{pid}")
+  }
+  detail.contains(",\"\{pid}\",")
+}
+
+///|
+#cfg(platform="windows")
+async fn run_moon_command(
+  root : String,
+  args : Array[String],
+  timeout_ms : Int,
+  _timeout_command : String?,
+  target? : String? = None,
+) -> CommandResult {
+  let command_args = moon_args(args, target)
+  let output = @process.redirect_to_file(root + "-moon-output.log")
+  // `spawn_orphan` deliberately leaves the process alive when the timed wait
+  // is cancelled. Keep moon.exe running until taskkill has walked its tree;
+  // the default Windows hard-cancel would kill only moon.exe and orphan the
+  // compiler/test descendants.
+  let pid = @process.spawn_orphan(
+    "moon",
+    command_args,
+    cwd=root,
+    stdout=output,
+    stderr=output,
+  )
+  let exit_code = @async.with_timeout_opt(timeout_ms, () => {
+    @process.wait_pid(pid)
+  })
+  match exit_code {
+    Some(0) => CommandSuccess
+    Some(_) => CommandFailure
+    None => {
+      let system_root = match @env.get_env_var("SystemRoot") {
+        Some(path) => path
+        None => fail("SystemRoot is unavailable; cannot locate taskkill.exe")
+      }
+      let taskkill = system_root + "\\System32\\taskkill.exe"
+      let cleanup_log = root + "-timeout-cleanup.log"
+      let cleanup_output = @process.redirect_to_file(cleanup_log)
+      let cleanup_status = @process.run(
+        taskkill,
+        ["/T", "/F", "/PID", pid.to_string()],
+        stdout=cleanup_output,
+        stderr=cleanup_output,
+      )
+      if cleanup_status != 0 {
+        let detail = @fs.read_file(cleanup_log).text() catch {
+          _ => "no taskkill diagnostic was written"
+        }
+        fail(
+          "Windows could not terminate timed-out moon.exe process tree " +
+          "(PID \{pid}, taskkill exit \{cleanup_status}): \{detail}",
+        )
+      }
+      let tasklist = system_root + "\\System32\\tasklist.exe"
+      let mut attempts = 50
+      while attempts > 0 {
+        if !windows_process_pid_listed(root, tasklist, pid) {
+          return CommandTimeout
+        }
+        @async.sleep(100)
+        attempts = attempts - 1
+      }
+      fail(
+        "taskkill reported success but timed-out moon.exe PID " +
+        "\{pid} remained alive after five seconds",
+      )
+    }
   }
 }
 
