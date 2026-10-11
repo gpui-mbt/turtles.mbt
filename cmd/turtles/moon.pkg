@@ -29,5 +29,5 @@ supported_targets = "+native"
 pkgtype(kind: "executable")
 
 options(
-  "native-stub": [ "windows_process.c" ],
+  "native-stub": [ "windows_process.c", "darwin_process.c" ],
 )

@@ -356,6 +356,7 @@ def fixed_contracts(producer, implementation):
 
 
 def copy_source(root, destination):
+    root = root.resolve()
     for path in root.rglob("*"):
         relative = path.relative_to(root)
         if any(part in IGNORED for part in relative.parts):

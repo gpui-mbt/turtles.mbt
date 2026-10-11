@@ -81,6 +81,45 @@ fn group_timeout_sent_kill(log : String) -> Bool {
 
 ///|
 #cfg(not(platform="windows"))
+extern "C" fn turtles_darwin_supervisor_flag() -> String = "turtles_darwin_supervisor_flag"
+
+///|
+#cfg(not(platform="windows"))
+extern "C" fn turtles_darwin_supervisor_timeout_marker() -> String = "turtles_darwin_supervisor_timeout_marker"
+
+///|
+#cfg(not(platform="windows"))
+extern "C" fn turtles_darwin_supervisor_error_marker() -> String = "turtles_darwin_supervisor_error_marker"
+
+///|
+#cfg(not(platform="windows"))
+extern "C" fn turtles_is_darwin() -> Bool = "turtles_is_darwin"
+
+///|
+#cfg(not(platform="windows"))
+extern "C" fn turtles_darwin_executable_path() -> String = "turtles_darwin_executable_path"
+
+///|
+#cfg(not(platform="windows"))
+fn darwin_supervisor_result(
+  exit_code : Int?,
+  log : String,
+) -> CommandResult raise {
+  if log.contains(turtles_darwin_supervisor_error_marker()) {
+    fail("Darwin process-group supervisor failed; see the moon output log")
+  }
+  if log.contains(turtles_darwin_supervisor_timeout_marker()) {
+    return CommandTimeout
+  }
+  match exit_code {
+    None => CommandTimeout
+    Some(0) => CommandSuccess
+    Some(_) => CommandFailure
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
 async fn run_moon_command(
   root : String,
   args : Array[String],
@@ -123,6 +162,38 @@ async fn run_moon_command(
       false
     }
     return group_timeout_result(exit_code, helper_sent_kill)
+  }
+  if turtles_is_darwin() {
+    // Without coreutils, re-exec this binary as a small Darwin supervisor.
+    // It owns a process group around moon so cancelling the helper cannot
+    // leave Moon's compiler or test executables running in the background.
+    let executable = turtles_darwin_executable_path()
+    guard executable != "" else {
+      fail(
+        "could not resolve turtles executable path for Darwin timeout supervisor",
+      )
+    }
+    let supervisor_args : Array[String] = [
+      turtles_darwin_supervisor_flag(),
+      timeout_ms.to_string(),
+      "--",
+      "moon",
+    ]
+    for arg in command_args {
+      supervisor_args.push(arg)
+    }
+    let exit_code = @async.with_timeout_opt(timeout_ms + 5000, () => {
+      @process.run(
+        executable,
+        supervisor_args,
+        cwd=root,
+        stdout=output,
+        stderr=output,
+        cancel_handler=@process.graceful_cancel(timeout=1000),
+      )
+    })
+    let log = @fs.read_file(root + "-moon-output.log").text() catch { _ => "" }
+    return darwin_supervisor_result(exit_code, log)
   }
   let exit_code = @async.with_timeout_opt(timeout_ms, () => {
     @process.run(

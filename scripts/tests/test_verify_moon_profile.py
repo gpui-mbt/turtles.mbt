@@ -117,12 +117,20 @@ class ProfileTests(unittest.TestCase):
         )
 
     def test_source_copy_rejects_external_links_and_preserves_mode_where_supported(self):
-        source = self.root / "source"
+        root = self.root
+        if sys.platform == "darwin":
+            private_var = Path("/private/var")
+            canonical_root = self.root.resolve()
+            if canonical_root.is_relative_to(private_var):
+                root = Path("/var") / canonical_root.relative_to(private_var)
+                self.assertNotEqual(root, root.resolve(), "test root must exercise a symlinked path alias")
+
+        source = root / "source"
         source.mkdir()
         (source / "a").write_text("source")
         (source / "a").chmod(0o755)
         (source / "internal").symlink_to("a")
-        destination = self.root / "copy"
+        destination = root / "copy"
         V.copy_source(source, destination)
         if os.name != "nt":
             self.assertEqual((destination / "a").stat().st_mode & 0o777, 0o755)
@@ -131,9 +139,9 @@ class ProfileTests(unittest.TestCase):
         baseline = V.snapshot(destination)
         (destination / "pollution").write_text("test-generated")
         self.assertNotEqual(V.snapshot(destination), baseline)
-        (source / "external").symlink_to(self.root / "outside")
+        (source / "external").symlink_to(root / "outside")
         with self.assertRaises(ValueError):
-            V.copy_source(source, self.root / "bad-copy")
+            V.copy_source(source, root / "bad-copy")
 
     def test_fresh_output_refuses_stale_success(self):
         output = self.root / "previous"
@@ -280,13 +288,13 @@ class ExportEvidenceTests(unittest.TestCase):
             (self.module / filename).write_text("fixed fixture " + filename)
             self.fixed[filename] = V.sha(self.module / filename)
         self.lock = {"export_backend": {"expected_goal_ids": sorted(V.GOALS), "why3_version": "1.7.2", "cli_sha256": "a" * 64, "prove_plugin_sha256": "b" * 64, "moon_why3_datadir_sha256": "c" * 64}}
-        libdir = self.why3.parent.parent / "lib/why3"
-        datadir = self.home / "share/why3"
+        libdir = (self.why3.parent.parent / "lib/why3").resolve()
+        datadir = (self.home / "share/why3").resolve()
         config = f'[main]\nmagic = 14\nlibdir = "{libdir}"\ndatadir = "{datadir}"\nstdlib = false\nload_default_plugins = false\n'
         (self.out / "why3-export.conf").write_text(config)
         self.bindings = {"run_id": self.run_id, "config_text": config, "config_sha256": V.sha(self.out / "why3-export.conf"),
                          "compiled_libdir": str(libdir), "actual_prove_plugin": str(libdir / "commands/why3prove.cmxs"), "actual_prove_plugin_sha256": "b" * 64,
-                         "effective_datadir": str(datadir), "effective_loadpaths": [str(self.home / "lib/prelude_proof"), str(datadir / "stdlib")], "stdlib": False,
+                         "effective_datadir": str(datadir), "effective_loadpaths": [str((self.home / "lib/prelude_proof").resolve()), str(datadir / "stdlib")], "stdlib": False,
                          "load_default_plugins": False, "plugin_entries": [], "cleared_environment_prefixes": ["WHY3"],
                          "sanitized_environment": {"WHY3CONFIG": None, "WHY3LOADPATH": None, "WHY3DATA": str(datadir), "WHY3LIB": str(libdir)},
                          "runtime": {"version": "Why3 platform, version 1.7.2", "cli_sha256": "a" * 64, "prove_plugin_sha256": "b" * 64, "moon_why3_datadir_sha256": "c" * 64}}

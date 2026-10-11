@@ -4,3 +4,7 @@ issues/
 # Python test and CLI caches are generated during CI and local checks.
 **/__pycache__/
 **/*.py[cod]
+
+# Keep nested fixture build output and dependency caches out of Mooncakes.
+**/_build/
+**/.mooncakes/

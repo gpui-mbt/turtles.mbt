@@ -1,4 +1,20 @@
 ///|
+#cfg(all(target="native", not(platform="windows")))
+#borrow(argv)
+extern "C" fn turtles_darwin_supervise(timeout_ms : Int, argv : Bytes) -> Int = "turtles_darwin_supervise"
+
+///|
+#cfg(all(target="native", not(platform="windows")))
+fn encode_supervisor_argv(args : Array[String]) -> Bytes {
+  let encoded = @buffer.Buffer()
+  for arg in args {
+    encoded.write_string_utf8(arg[:])
+    encoded.write_byte(b'\x00')
+  }
+  encoded.to_bytes()
+}
+
+///|
 // The timeout probe must survive an absent `timeout` executable, then select
 // the next candidate. Absolute paths make this test independent of PATH.
 #cfg(all(target="native", not(platform="windows")))
@@ -64,6 +80,44 @@ async test "GNU group timeout distinguishes expiry from child exit 137" {
       None => println("Skipping GNU timeout regression: helper is unavailable")
     }
   })
+}
+
+///|
+/// The native Darwin supervisor must preserve ordinary command statuses;
+/// only its private timeout marker turns a command into TIMEOUT.
+#cfg(all(target="native", not(platform="windows")))
+test "Darwin process-group supervisor preserves child exit status" {
+  if turtles_is_darwin() {
+    assert_eq(
+      turtles_darwin_supervise(
+        3000,
+        encode_supervisor_argv(["/bin/sh", "-c", "exit 0"]),
+      ),
+      0,
+    )
+    assert_eq(
+      turtles_darwin_supervise(
+        3000,
+        encode_supervisor_argv(["/bin/sh", "-c", "exit 7"]),
+      ),
+      7,
+    )
+  }
+}
+
+///|
+/// An exec failure is reported as an ordinary failed command, not as a
+/// supervisor-cleanup error that aborts the whole mutation run.
+#cfg(all(target="native", not(platform="windows")))
+test "Darwin process-group supervisor preserves exec failure status" {
+  if turtles_is_darwin() {
+    let status = turtles_darwin_supervise(
+      3000,
+      encode_supervisor_argv(["/dev/null"]),
+    )
+    assert_eq(status, 127)
+    assert_true(darwin_supervisor_result(Some(status), "") == CommandFailure)
+  }
 }
 
 ///|
