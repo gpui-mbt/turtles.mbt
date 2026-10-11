@@ -18,7 +18,6 @@ EXTENDED_STARTUPINFO_PRESENT = 0x00080000
 WAIT_OBJECT_0 = 0
 WAIT_TIMEOUT = 258
 WAIT_FAILED = 0xFFFFFFFF
-INFINITE = 0xFFFFFFFF
 
 
 class BASIC_LIMIT_INFORMATION(ctypes.Structure):
@@ -167,8 +166,9 @@ class WindowsJobProcess:
             # descendant before this process is owned by the kill-on-close job.
             if not self._kernel.AssignProcessToJobObject(job, process_handle):
                 error = ctypes.get_last_error()
-                self._abort_suspended(process_handle, None)
+                failed_process_handle = process_handle
                 process_handle = None
+                self._abort_suspended(failed_process_handle, None)
                 raise ctypes.WinError(
                     error,
                     "AssignProcessToJobObject failed; refusing an unowned process",
@@ -177,8 +177,9 @@ class WindowsJobProcess:
 
             if self._kernel.ResumeThread(thread_handle) == 0xFFFFFFFF:
                 error = ctypes.get_last_error()
-                self._abort_suspended(process_handle, job)
+                failed_process_handle = process_handle
                 process_handle = None
+                self._abort_suspended(failed_process_handle, job)
                 raise ctypes.WinError(error, "ResumeThread failed")
 
             _winapi.CloseHandle(thread_handle)
@@ -190,7 +191,11 @@ class WindowsJobProcess:
             job = None
         except BaseException:
             if process_handle is not None:
-                self._abort_suspended(process_handle, job if assigned else None)
+                failed_process_handle = process_handle
+                process_handle = None
+                self._abort_suspended(
+                    failed_process_handle, job if assigned else None
+                )
             raise
         finally:
             try:
@@ -269,21 +274,39 @@ class WindowsJobProcess:
         return self._active_processes_in(self._job)
 
     def _abort_suspended(self, process_handle, job_handle):
-        if job_handle is not None:
-            self._kernel.TerminateJobObject(job_handle, 1)
-        else:
-            self._winapi.TerminateProcess(process_handle, 1)
-        result = self._winapi.WaitForSingleObject(process_handle, 5000)
-        if result != WAIT_OBJECT_0:
-            raise OSError("could not wait for a failed suspended process launch")
-        if job_handle is not None:
-            deadline = time.monotonic() + 5
-            while self._active_processes_in(job_handle) != 0:
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(
-                        "failed Windows process launch left owned descendants alive"
-                    )
-                time.sleep(0.01)
+        failure = None
+        try:
+            if job_handle is not None:
+                if not self._kernel.TerminateJobObject(job_handle, 1):
+                    # The process is still suspended and cannot have spawned
+                    # descendants, so terminate the root directly as fallback.
+                    try:
+                        self._winapi.TerminateProcess(process_handle, 1)
+                    except OSError:
+                        pass
+            else:
+                self._winapi.TerminateProcess(process_handle, 1)
+            result = self._winapi.WaitForSingleObject(process_handle, 5000)
+            if result != WAIT_OBJECT_0:
+                raise OSError("could not wait for a failed suspended process launch")
+            if job_handle is not None:
+                deadline = time.monotonic() + 5
+                while self._active_processes_in(job_handle) != 0:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(
+                            "failed Windows process launch left owned descendants alive"
+                        )
+                    time.sleep(0.01)
+        except BaseException as exc:
+            failure = exc
+        finally:
+            try:
+                self._winapi.CloseHandle(process_handle)
+            except BaseException as exc:
+                if failure is None:
+                    failure = exc
+        if failure is not None:
+            raise failure
 
     def poll(self):
         if self.returncode is not None:
@@ -301,19 +324,26 @@ class WindowsJobProcess:
     def wait(self, timeout=None):
         if self.returncode is not None:
             return self.returncode
-        if timeout is None:
-            milliseconds = INFINITE
-        else:
-            milliseconds = max(0, min(INFINITE - 1, int(timeout * 1000 + 0.999)))
-        result = self._winapi.WaitForSingleObject(self._process, milliseconds)
-        if result == WAIT_TIMEOUT:
-            raise subprocess.TimeoutExpired(self.argv, timeout)
-        if result == WAIT_FAILED:
-            raise ctypes.WinError(ctypes.get_last_error(), "process wait failed")
-        if result != WAIT_OBJECT_0:
-            raise OSError(f"unexpected process wait result: {result}")
-        self.returncode = self._winapi.GetExitCodeProcess(self._process)
-        return self.returncode
+        if self.poll() is not None:
+            return self.returncode
+        deadline = None if timeout is None else time.monotonic() + max(0, timeout)
+        while True:
+            if deadline is None:
+                milliseconds = 100
+            else:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(self.argv, timeout)
+                milliseconds = max(1, min(100, int(remaining * 1000 + 0.999)))
+            result = self._winapi.WaitForSingleObject(self._process, milliseconds)
+            if result == WAIT_TIMEOUT:
+                continue
+            if result == WAIT_FAILED:
+                raise ctypes.WinError(ctypes.get_last_error(), "process wait failed")
+            if result != WAIT_OBJECT_0:
+                raise OSError(f"unexpected process wait result: {result}")
+            self.returncode = self._winapi.GetExitCodeProcess(self._process)
+            return self.returncode
 
     def kill(self):
         if self._job is None:

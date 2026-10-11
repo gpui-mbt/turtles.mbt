@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import _thread
+import ctypes
+import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from ctypes import wintypes
 from unittest.mock import patch
 
 from scripts import verify_moon_profile
@@ -51,7 +56,21 @@ class WindowsSmokeProcessTests(unittest.TestCase):
 
         self.assertEqual(matches, {windows_smoke.process_identity(helper)})
 
+    def test_executable_matching_is_case_insensitive(self) -> None:
+        helper = process(
+            504,
+            r"c:\TOOLS\PYTHON.EXE",
+            fr'"c:\TOOLS\PYTHON.EXE" --persistent-child {TOKEN}',
+        )
 
+        matches = windows_smoke.persistent_helper_identities(
+            [helper], PYTHON, TOKEN
+        )
+
+        self.assertEqual(matches, {windows_smoke.process_identity(helper)})
+
+
+@unittest.skipUnless(os.name == "nt", "Windows Job Object contract tests")
 class WindowsVerifierJobTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="verify-job-")
@@ -137,6 +156,48 @@ class WindowsVerifierJobTests(unittest.TestCase):
             "cancellation must not leave its owned descendant running",
         )
 
+    def test_real_keyboard_interrupt_is_prompt_and_terminates_descendants(self) -> None:
+        ready = self.root / "interrupt-child-ready.txt"
+        survived = self.root / "interrupt-child-survived.txt"
+        parent, child = self.descendant_command(ready, survived)
+        interrupt_sent = threading.Event()
+
+        def interrupt_after_child_starts() -> None:
+            deadline = time.monotonic() + 3
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            if ready.exists():
+                time.sleep(0.15)
+                _thread.interrupt_main()
+                interrupt_sent.set()
+
+        interrupter = threading.Thread(
+            target=interrupt_after_child_starts,
+            name="verifier-test-interrupter",
+            daemon=True,
+        )
+        interrupter.start()
+        started = time.monotonic()
+        with self.assertRaises(KeyboardInterrupt):
+            verify_moon_profile.run(
+                [sys.executable, "-c", parent, child, str(ready)],
+                self.root,
+                {},
+                self.root / "descendant-interrupt.log",
+                10,
+            )
+        elapsed = time.monotonic() - started
+        interrupter.join(timeout=1)
+
+        self.assertTrue(interrupt_sent.is_set(), "interrupt thread must deliver SIGINT")
+        self.assertTrue(ready.exists(), "the test child must actually start")
+        self.assertLess(elapsed, 3, "native waits must return promptly to Python signals")
+        time.sleep(1.6)
+        self.assertFalse(
+            survived.exists(),
+            "a real KeyboardInterrupt must not leave its owned descendant running",
+        )
+
     def test_normal_completion_drains_descendants_after_parent_exits(self) -> None:
         ready = self.root / "exit-child-ready.txt"
         survived = self.root / "exit-child-survived.txt"
@@ -173,19 +234,66 @@ class WindowsVerifierJobTests(unittest.TestCase):
         self.assertEqual(report["exit_code"], 0)
         self.assertIn("utf16-path-ok", log.read_text(encoding="utf-8"))
 
-    def test_executable_matching_is_case_insensitive(self) -> None:
-        helper = process(
-            504,
-            r"c:\TOOLS\PYTHON.EXE",
-            fr'"c:\TOOLS\PYTHON.EXE" --persistent-child {TOKEN}',
-        )
+    def test_failed_suspended_launches_close_the_process_handle(self) -> None:
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.GetHandleInformation.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel.GetHandleInformation.restype = wintypes.BOOL
+        original_configure = verify_moon_profile.WindowsJobProcess._configure_kernel
+        original_abort = verify_moon_profile.WindowsJobProcess._abort_suspended
 
-        matches = windows_smoke.persistent_helper_identities(
-            [helper], PYTHON, TOKEN
-        )
+        for failure in ("assignment", "resume"):
+            with self.subTest(failure=failure):
+                marker = self.root / f"{failure}-failure-child-ran.txt"
+                code = f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')"
+                process_handles = []
 
-        self.assertEqual(matches, {windows_smoke.process_identity(helper)})
+                def configure(process):
+                    original_configure(process)
+                    if failure == "assignment":
+                        def fail_assignment(_job, _child):
+                            ctypes.set_last_error(5)
+                            return False
 
+                        process._kernel.AssignProcessToJobObject = fail_assignment
+                    else:
+                        def fail_resume(_thread):
+                            ctypes.set_last_error(5)
+                            return 0xFFFFFFFF
+
+                        process._kernel.ResumeThread = fail_resume
+
+                def record_abort(process, child_handle, job_handle):
+                    process_handles.append(child_handle)
+                    return original_abort(process, child_handle, job_handle)
+
+                with patch.object(
+                    verify_moon_profile.WindowsJobProcess,
+                    "_configure_kernel",
+                    configure,
+                ), patch.object(
+                    verify_moon_profile.WindowsJobProcess,
+                    "_abort_suspended",
+                    record_abort,
+                ):
+                    with (self.root / f"{failure}-failure.log").open("w") as stream:
+                        with self.assertRaises(OSError):
+                            verify_moon_profile.WindowsJobProcess(
+                                [sys.executable, "-c", code],
+                                self.root,
+                                os.environ.copy(),
+                                stream,
+                            )
+
+                self.assertEqual(len(process_handles), 1)
+                flags = wintypes.DWORD()
+                self.assertFalse(
+                    kernel.GetHandleInformation(process_handles[0], ctypes.byref(flags)),
+                    "a failed suspended launch must close its process handle",
+                )
+                self.assertFalse(marker.exists(), "a failed launch must not resume the child")
 
 if __name__ == "__main__":
     unittest.main()
