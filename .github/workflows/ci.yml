@@ -403,7 +403,7 @@ jobs:
               report = json.load(handle)
 
           assert report["schema"] == 3
-          assert report["turtles_version"] == "0.4.3"
+          assert report["turtles_version"] == "0.4.4"
           assert len(report["mutants"]) == 6
           assert report["summary"]["killed"] == 6
           assert report["summary"]["survived"] == 0

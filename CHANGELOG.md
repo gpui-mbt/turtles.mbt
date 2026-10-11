@@ -16,6 +16,12 @@
 
 ### Migration
 
+## 0.4.4 (candidate for review)
+
+### Fixed
+
+- Terminate timed-out Windows `moon.exe` process trees, verify cleanup, and surface failures instead of leaving subprocesses behind.
+
 ## 0.4.3 (candidate for review)
 
 ### Improved
