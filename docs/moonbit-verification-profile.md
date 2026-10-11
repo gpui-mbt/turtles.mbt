@@ -57,6 +57,9 @@ refused without overwriting or consuming a previous success. There is no cache
 reuse between profile runs. Source files, modes, origin commit/tree, source
 edits, contracts, tests, profile, runtime support binaries and proof tool/config/
 plugin/loadpath identities are recorded. Caller source is checked unchanged.
+On Windows, each command starts suspended and is assigned to a kill-on-close Job
+Object before it resumes. Timeout, cancellation, and normal completion terminate
+and wait for every process owned by that command, including descendants.
 
 ## What runs
 

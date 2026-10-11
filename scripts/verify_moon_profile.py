@@ -26,6 +26,11 @@ import tempfile
 import time
 import uuid
 
+if __package__:
+    from .windows_job import WindowsJobProcess
+else:
+    from windows_job import WindowsJobProcess
+
 PROFILE = "moonbit-composition-helpers-v1"
 PRODUCER = "infra/linux-desktop/composition-proof.py"
 PRODUCER_SHA256 = "78ba554319eba17e50034fc59f14c531c539d2929d53bb012497363360b6975a"
@@ -120,17 +125,14 @@ def load_profile(path):
 
 
 def terminate(proc):
-    if proc.poll() is not None:
-        return
     if os.name == "nt":
-        # Windows can terminate this direct child, but does not offer the
-        # POSIX process-group semantics used by this verifier. Descendant
-        # process-tree cleanup is not claimed on Windows.
+        # Kill the job even if its initial process already exited: children
+        # may still be alive and remain owned by the job.
         proc.kill()
-        try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            pass
+        proc.wait(timeout=2)
+        proc.wait_for_job(timeout=2)
+        return
+    if proc.poll() is not None:
         return
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
@@ -148,14 +150,17 @@ def run(argv, cwd, env, log, timeout):
     with Path(log).open("x") as stream:
         stream.write("COMMAND " + json.dumps(argv) + "\n")
         stream.flush()
-        proc = subprocess.Popen(
-            argv,
-            cwd=cwd,
-            env=env,
-            stdout=stream,
-            stderr=subprocess.STDOUT,
-            start_new_session=os.name != "nt",
-        )
+        if os.name == "nt":
+            proc = WindowsJobProcess(argv, cwd, env, stream)
+        else:
+            proc = subprocess.Popen(
+                argv,
+                cwd=cwd,
+                env=env,
+                stdout=stream,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
         try:
             code = proc.wait(timeout=timeout)
             timed_out = False
@@ -163,7 +168,11 @@ def run(argv, cwd, env, log, timeout):
             terminate(proc)
             code, timed_out = proc.returncode, True
         finally:
-            terminate(proc)
+            try:
+                terminate(proc)
+            finally:
+                if os.name == "nt":
+                    proc.close()
     return {"command": argv, "exit_code": code, "timed_out": timed_out, "seconds": time.monotonic() - started, "log": str(log)}
 
 
@@ -347,6 +356,7 @@ def fixed_contracts(producer, implementation):
 
 
 def copy_source(root, destination):
+    root = root.resolve()
     for path in root.rglob("*"):
         relative = path.relative_to(root)
         if any(part in IGNORED for part in relative.parts):

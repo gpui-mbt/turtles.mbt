@@ -395,7 +395,9 @@ jobs:
           fi
           report="$RUNNER_TEMP/turtles-report.json"
           PATH="$fallback_path" moon run cmd/turtles -- --dir fixtures/basic --timeout 30 --json "$report"
-          python3 - "$report" <<'PY'
+          expected_version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' moon.mod)
+          test -n "$expected_version"
+          python3 - "$report" "$expected_version" <<'PY'
           import json
           import sys
 
@@ -403,7 +405,7 @@ jobs:
               report = json.load(handle)
 
           assert report["schema"] == 3
-          assert report["turtles_version"] == "0.4.5"
+          assert report["turtles_version"] == sys.argv[2]
           assert len(report["mutants"]) == 6
           assert report["summary"]["killed"] == 6
           assert report["summary"]["survived"] == 0

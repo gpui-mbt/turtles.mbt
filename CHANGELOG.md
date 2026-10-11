@@ -16,11 +16,17 @@
 
 ### Migration
 
-## 0.4.5
+## 0.4.6
 
 ### Fixed
 
 - On macOS without GNU coreutils, supervise `moon` in a process group and terminate same-group descendants on timeout or cancellation instead of leaving compiler/test processes running.
+
+## 0.4.5
+
+### Fixed
+
+- Give the bounded verification companion the same Windows process-tree timeout and cancellation ownership: launch suspended, assign a kill-on-close Job Object before resume, and wait for owned descendants to exit.
 
 ## 0.4.4
 
