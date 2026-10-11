@@ -20,7 +20,7 @@
 
 ### Fixed
 
-- Terminate timed-out Windows `moon.exe` process trees, verify cleanup, and surface failures instead of leaving subprocesses behind.
+- Run Windows `moon.exe` commands in a scoped Job Object and terminate/wait for owned descendants on timeout or cancellation; surface cleanup errors.
 
 ## 0.4.3 (candidate for review)
 

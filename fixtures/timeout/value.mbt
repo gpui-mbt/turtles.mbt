@@ -1,3 +1,3 @@
-pub fn increment(value : Int) -> Int {
-  value + 1
+pub fn should_timeout() -> Bool {
+  false
 }

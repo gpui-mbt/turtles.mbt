@@ -11,12 +11,116 @@ import subprocess
 import sys
 import tempfile
 import time
+import ctypes
+from ctypes import wintypes
+import uuid
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 ProcessIdentity = tuple[int, str, str, str, str]
+
+PROCESS_TERMINATE = 0x0001
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+SYNCHRONIZE = 0x00100000
+WAIT_OBJECT_0 = 0
+WAIT_TIMEOUT = 258
+ERROR_INVALID_PARAMETER = 87
+
+
+class FILETIME(ctypes.Structure):
+    _fields_ = [("dwLowDateTime", wintypes.DWORD), ("dwHighDateTime", wintypes.DWORD)]
+
+
+def kernel32() -> ctypes.WinDLL:
+    return ctypes.WinDLL("kernel32", use_last_error=True)
+
+
+def process_creation_ticks(handle: int) -> int:
+    create = FILETIME()
+    exit_time = FILETIME()
+    kernel = kernel32()
+    kernel.GetProcessTimes.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(FILETIME),
+        ctypes.POINTER(FILETIME),
+        ctypes.POINTER(FILETIME),
+        ctypes.POINTER(FILETIME),
+    ]
+    kernel.GetProcessTimes.restype = wintypes.BOOL
+    if not kernel.GetProcessTimes(
+        handle,
+        ctypes.byref(create),
+        ctypes.byref(exit_time),
+        ctypes.byref(FILETIME()),
+        ctypes.byref(FILETIME()),
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return (create.dwHighDateTime << 32) | create.dwLowDateTime
+
+
+def run_persistent_child(token: str, ready_path: Path) -> int:
+    """Write a stable process identity, then remain alive for timeout checks."""
+    kernel = kernel32()
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    process = kernel.GetCurrentProcess()
+    ticks = process_creation_ticks(process)
+    ready_path.write_text(f"{os.getpid()} {token} {ticks}\n", encoding="ascii")
+    while True:
+        time.sleep(60)
+
+
+def cleanup_persistent_child(ready_path: Path, expected_token: str) -> None:
+    """Terminate only the exact helper identity minted by this smoke attempt."""
+    if not ready_path.exists():
+        return
+    fields = ready_path.read_text(encoding="ascii").split()
+    if len(fields) != 3 or fields[1] != expected_token:
+        raise RuntimeError("timeout helper identity file did not match this attempt")
+    pid, _, expected_creation = int(fields[0]), fields[1], int(fields[2])
+
+    kernel = kernel32()
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.GetProcessTimes.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(FILETIME),
+        ctypes.POINTER(FILETIME),
+        ctypes.POINTER(FILETIME),
+        ctypes.POINTER(FILETIME),
+    ]
+    kernel.GetProcessTimes.restype = wintypes.BOOL
+    kernel.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel.TerminateProcess.restype = wintypes.BOOL
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+
+    handle = kernel.OpenProcess(
+        PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+        False,
+        pid,
+    )
+    if not handle:
+        error = ctypes.get_last_error()
+        if error == ERROR_INVALID_PARAMETER:
+            return  # Windows no longer has this PID.
+        raise ctypes.WinError(error)
+    try:
+        if process_creation_ticks(handle) != expected_creation:
+            return  # The PID was reused after the original helper exited.
+        if kernel.WaitForSingleObject(handle, 0) == WAIT_OBJECT_0:
+            return
+        if not kernel.TerminateProcess(handle, 1):
+            if kernel.WaitForSingleObject(handle, 0) == WAIT_OBJECT_0:
+                return
+            raise ctypes.WinError(ctypes.get_last_error())
+        if kernel.WaitForSingleObject(handle, 10000) != WAIT_OBJECT_0:
+            raise RuntimeError(f"could not clean up timeout helper PID {pid}")
+    finally:
+        kernel.CloseHandle(handle)
 
 
 def process_environment(moon: str) -> dict[str, str]:
@@ -108,104 +212,17 @@ def process_identity(row: dict) -> ProcessIdentity:
     )
 
 
-def find_process_identity(
-    processes: list[dict],
-    root_pid: int,
-    expected_executable: str,
-    expected_command_fragment: str,
-) -> ProcessIdentity | None:
-    by_pid = {int(row["ProcessId"]): row for row in processes}
-    root = by_pid.get(root_pid)
-    if root is None:
-        return None
-    identity = process_identity(root)
-    if (
-        identity[2] != expected_executable.casefold()
-        or expected_command_fragment.casefold() not in identity[3]
-    ):
-        return None
-    return identity
-
-
-def process_children(
-    processes: list[dict],
-    root_identity: ProcessIdentity,
-    expected_child_executable: str,
+def persistent_helper_identities(
+    processes: list[dict], expected_executable: str, token: str
 ) -> set[ProcessIdentity]:
-    by_pid = {int(row["ProcessId"]): row for row in processes}
-    root = by_pid.get(root_identity[0])
-    # A child may exit between two snapshots. Requiring the complete root
-    # identity prevents a reused PID from making an unrelated process look like
-    # the turtles process whose subprocesses this smoke is tracking.
-    if root is None or process_identity(root) != root_identity:
-        return set()
+    expected_executable = expected_executable.casefold()
+    token = token.casefold()
     return {
-        process_identity(by_pid[child])
-        for child, row in by_pid.items()
-        if int(row["ParentProcessId"] or 0) == root_identity[0]
-        and str(row["ExecutablePath"] or "").casefold()
-        == expected_child_executable.casefold()
+        process_identity(row)
+        for row in processes
+        if str(row.get("ExecutablePath") or "").casefold() == expected_executable
+        and token in str(row.get("CommandLine") or "").casefold()
     }
-
-
-def process_descendant_depths(
-    processes: list[dict], root_identity: ProcessIdentity
-) -> dict[ProcessIdentity, int]:
-    by_pid = {int(row["ProcessId"]): row for row in processes}
-    root = by_pid.get(root_identity[0])
-    if root is None or process_identity(root) != root_identity:
-        return {}
-
-    children_by_parent: dict[int, list[dict]] = {}
-    for row in processes:
-        parent = int(row["ParentProcessId"] or 0)
-        children_by_parent.setdefault(parent, []).append(row)
-
-    descendants: dict[ProcessIdentity, int] = {}
-    frontier = [(root_identity[0], root_identity[4], 0)]
-    visited = {root_identity[0]}
-    while frontier:
-        next_frontier: list[tuple[int, str, int]] = []
-        for parent_pid, parent_created, parent_depth in frontier:
-            for row in children_by_parent.get(parent_pid, []):
-                identity = process_identity(row)
-                # WMI reports the parent PID but not its creation time. A
-                # child older than the current parent with that PID belongs
-                # to an earlier process and must not be attributed to it.
-                if identity[4] < parent_created:
-                    continue
-                depth = parent_depth + 1
-                descendants[identity] = depth
-                child_pid = identity[0]
-                if child_pid not in visited:
-                    visited.add(child_pid)
-                    next_frontier.append((child_pid, identity[4], depth))
-        frontier = next_frontier
-    return descendants
-
-
-def require_observed_children(children: set[ProcessIdentity]) -> None:
-    if not children:
-        raise RuntimeError("timeout smoke observed no direct nested moon.exe children")
-
-
-def require_observed_nested_processes(
-    children: set[ProcessIdentity], descendants: dict[ProcessIdentity, int]
-) -> None:
-    require_observed_children(children)
-    if not any(depth >= 2 for depth in descendants.values()):
-        raise RuntimeError("timeout smoke observed no descendants beneath moon.exe")
-
-
-def require_descendants_exited(
-    observed: set[ProcessIdentity], live: set[ProcessIdentity]
-) -> None:
-    remaining = observed & live
-    if remaining:
-        raise RuntimeError(
-            "timed-out subprocess descendants remain alive: "
-            f"{sorted(pid for pid, _, _, _, _ in remaining)}"
-        )
 
 
 def run_timeout_smoke(
@@ -215,8 +232,8 @@ def run_timeout_smoke(
     if powershell is None:
         raise RuntimeError("powershell.exe is required for the Windows timeout check")
 
-    expected_turtles = str(Path(turtles).resolve())
-    expected_moon = str(Path(moon).resolve())
+    expected_python = str(Path(sys.executable).resolve())
+    helper_script = str(Path(__file__).resolve())
     output_dir = report.with_name(f"{report.stem}-output")
     for attempt in (1, 2):
         attempt_report = (
@@ -230,40 +247,36 @@ def run_timeout_smoke(
             "--fail-under", "1", "--iterate",
             "--output-dir", str(output_dir), "--json", str(attempt_report),
         ]
+        token = uuid.uuid4().hex
+        ready_path = report.with_name(f"{report.stem}-helper-{token}.txt")
+        attempt_env = env.copy()
+        attempt_env.update(
+            {
+                "TURTLES_TIMEOUT_HELPER": expected_python,
+                "TURTLES_TIMEOUT_HELPER_SCRIPT": helper_script,
+                "TURTLES_TIMEOUT_HELPER_TOKEN": token,
+                "TURTLES_TIMEOUT_HELPER_READY": str(ready_path.resolve()),
+            }
+        )
         process = subprocess.Popen(
             command,
             cwd=ROOT,
-            env=env,
+            env=attempt_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
         )
-        seen_children: set[ProcessIdentity] = set()
-        seen_descendant_depths: dict[ProcessIdentity, int] = {}
-        root_identity: ProcessIdentity | None = None
+        seen_helper: set[ProcessIdentity] = set()
         deadline = time.monotonic() + 180
+        output = ""
         try:
             while True:
                 snapshot = windows_processes(powershell)
-                if root_identity is None:
-                    root_identity = find_process_identity(
-                        snapshot,
-                        process.pid,
-                        expected_turtles,
-                        "--dir fixtures/timeout",
-                    )
-                if root_identity is not None:
-                    seen_children.update(
-                        process_children(snapshot, root_identity, expected_moon)
-                    )
-                    for identity, depth in process_descendant_depths(
-                        snapshot, root_identity
-                    ).items():
-                        seen_descendant_depths[identity] = max(
-                            depth, seen_descendant_depths.get(identity, 0)
-                        )
+                seen_helper.update(
+                    persistent_helper_identities(snapshot, expected_python, token)
+                )
                 if process.poll() is not None:
                     break
                 if time.monotonic() >= deadline:
@@ -276,41 +289,48 @@ def run_timeout_smoke(
             if process.poll() is None:
                 process.kill()
             process.communicate(timeout=30)
+            cleanup_persistent_child(ready_path, token)
             raise
+        try:
+            fields = ready_path.read_text(encoding="ascii").split()
+            if len(fields) != 3 or fields[1] != token:
+                raise RuntimeError(
+                    f"timeout fixture attempt {attempt} did not start its tokenized helper"
+                )
+            helper_pid = int(fields[0])
+            if not any(identity[0] == helper_pid for identity in seen_helper):
+                raise RuntimeError(
+                    f"timeout fixture attempt {attempt} never observed its own persistent helper"
+                )
+            if process.returncode != 1:
+                raise RuntimeError(
+                    f"timeout fixture attempt {attempt}: expected fail-under exit 1, "
+                    f"got {process.returncode}\n{output}"
+                )
+            timeout_report = read_report(attempt_report)
+            summary = timeout_report["summary"]
+            assert summary["timeout"] == 1, summary
+            assert summary["score"] == 0, summary
+            assert summary["reused"] == 0, summary
 
-        if root_identity is None:
-            raise RuntimeError(
-                f"timeout smoke attempt {attempt} never observed its turtles.exe process"
-            )
-        require_observed_nested_processes(
-            seen_children, seen_descendant_depths
-        )
-        if process.returncode != 1:
-            raise RuntimeError(
-                f"timeout fixture attempt {attempt}: expected fail-under exit 1, "
-                f"got {process.returncode}\n{output}"
-            )
-        timeout_report = read_report(attempt_report)
-        summary = timeout_report["summary"]
-        assert summary["timeout"] == 1, summary
-        assert summary["score"] == 0, summary
-        # TIMEOUT verdicts must never be reused, including on Windows' direct
-        # process-cancellation path.
-        assert summary["reused"] == 0, summary
-
-        cleanup_deadline = time.monotonic() + 8
-        live_processes = {
-            process_identity(row) for row in windows_processes(powershell)
-        }
-        seen_descendants = set(seen_descendant_depths)
-        remaining = seen_descendants & live_processes
-        while remaining and time.monotonic() < cleanup_deadline:
-            time.sleep(0.2)
-            live_processes = {
-                process_identity(row) for row in windows_processes(powershell)
-            }
-            remaining = seen_descendants & live_processes
-        require_descendants_exited(seen_descendants, live_processes)
+            cleanup_deadline = time.monotonic() + 2
+            remaining = seen_helper.copy()
+            while remaining and time.monotonic() < cleanup_deadline:
+                live_helpers = persistent_helper_identities(
+                    windows_processes(powershell), expected_python, token
+                )
+                remaining = seen_helper & live_helpers
+                if remaining:
+                    time.sleep(0.1)
+            if remaining:
+                raise RuntimeError(
+                    "timed-out mutation left its tokenized helper alive: "
+                    f"{sorted(pid for pid, _, _, _, _ in remaining)}"
+                )
+        finally:
+            # If the runner regresses, terminate only this child's PID and
+            # creation time, never a tree inferred from Windows parent IDs.
+            cleanup_persistent_child(ready_path, token)
 
 
 def build_turtles(moon: str, env: dict[str, str]) -> Path:
@@ -331,6 +351,9 @@ def build_turtles(moon: str, env: dict[str, str]) -> Path:
 
 
 def main() -> int:
+    if len(sys.argv) == 4 and sys.argv[1] == "--persistent-child":
+        return run_persistent_child(sys.argv[2], Path(sys.argv[3]))
+
     moon = shutil.which("moon")
     if moon is None:
         raise RuntimeError("moon was not found on PATH")

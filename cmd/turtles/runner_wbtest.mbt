@@ -67,6 +67,128 @@ async test "GNU group timeout distinguishes expiry from child exit 137" {
 }
 
 ///|
+/// Cancellation can happen to a worker while its configured command timeout
+/// is still pending. The process tree must be cleaned before that worker
+/// propagates cancellation to its parent.
+#cfg(all(target="native", platform="windows"))
+async test "external cancellation terminates the owned moon process tree" {
+  let cwd = @env.current_dir().unwrap()
+  // The directory name also checks that both the working and output paths
+  // survive Windows API handling when they contain spaces.
+  let temp = path_join(cwd, ".turtles external cancel-\{@async.now()}")
+  @async.with_task_group() <| group => {
+    group.add_defer(() => {
+      @fs.rmdir(temp, recursive=true)
+      @fs.remove(temp + "-moon-output.log") catch {
+        _ => ()
+      }
+    })
+    @fs.mkdir(temp)
+    @fs.write_file(
+      path_join(temp, "moon.mod"),
+      (
+        #|name = "f4ah6o/turtles_external_cancel"
+        #|version = "0.1.0"
+        #|
+        #|import {
+        #|  "moonbitlang/async@0.22.4",
+        #|}
+        #|
+      ),
+    )
+    @fs.write_file(
+      path_join(temp, "moon.pkg"),
+      (
+        #|import {
+        #|  "moonbitlang/async",
+        #|  "moonbitlang/async/fs",
+        #|  "moonbitlang/async/process",
+        #|}
+        #|
+      ),
+    )
+    @fs.write_file(
+      path_join(temp, "cancel_test.mbt"),
+      (
+        #|async test "child outlives its test process" {
+        #|  let pid = @process.spawn_orphan(
+        #|    "powershell.exe",
+        #|    [
+        #|      "-NoLogo",
+        #|      "-NoProfile",
+        #|      "-NonInteractive",
+        #|      "-Command",
+        #|      "for ($i = 0; $i -lt 100; $i++) { [IO.File]::AppendAllText('heartbeat.txt', 'x'); Start-Sleep -Milliseconds 100 }",
+        #|    ],
+        #|  )
+        #|  @fs.write_file("child.pid", pid.to_string())
+        #|  @async.sleep(10000)
+        #|}
+        #|
+      ),
+    )
+    let runner = group.spawn(no_wait=true, () => {
+      run_moon_command(temp, ["test", "--target", "native"], 60000, None)
+    })
+    let started = @async.with_timeout_opt(60000, () => {
+      while !@fs.exists(path_join(temp, "heartbeat.txt")) {
+        @async.sleep(50)
+      }
+    })
+    if started is None {
+      runner.cancel()
+      ignore(
+        @async.with_timeout_opt(10000, () => {
+          runner.wait() catch {
+            @async.WaitedTaskAlreadyCancelled => CommandTimeout
+            error => raise error
+          }
+        }),
+      )
+      let output = @fs.read_file(temp + "-moon-output.log").text() catch {
+        _ => "no moon output was recorded"
+      }
+      fail("external cancellation fixture did not start its child: " + output)
+    }
+    runner.cancel()
+    let finished = @async.with_timeout_opt(10000, () => {
+      runner.wait() catch {
+        @async.WaitedTaskAlreadyCancelled => CommandTimeout
+        error => raise error
+      }
+    })
+    assert_true(finished is Some(CommandTimeout))
+    assert_true(@fs.exists(temp + "-moon-output.log"))
+    let after_termination = @fs.read_file(path_join(temp, "heartbeat.txt"))
+      .text()
+      .length()
+    @async.sleep(300)
+    let settled = @fs.read_file(path_join(temp, "heartbeat.txt"))
+      .text()
+      .length()
+    if settled != after_termination {
+      // Let the bounded fixture finish naturally before failing, so a broken
+      // cleanup path never leaves its test executable or helper on the host.
+      @async.sleep(11000)
+      fail("external cancellation left the fixture's helper alive")
+    }
+  }
+}
+
+///|
+#cfg(all(target="native", platform="windows"))
+test "Windows moon command line escapes arguments with spaces and quotes" {
+  inspect(
+    windows_moon_command_line([
+      "test", "path with spaces", "quote\"and\\slash", "slash space\\", "",
+    ]),
+    content=(
+      #|moon.exe test "path with spaces" "quote\"and\slash" "slash space\\" ""
+    ),
+  )
+}
+
+///|
 async fn write_order_fixture(dir : String) -> Unit {
   @fs.write_file(
     path_join(dir, "moon.mod"),
