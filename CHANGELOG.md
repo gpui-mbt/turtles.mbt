@@ -16,6 +16,12 @@
 
 ### Migration
 
+## 0.4.4
+
+### Fixed
+
+- Run Windows `moon.exe` commands in a scoped Job Object and terminate/wait for owned descendants on timeout or cancellation; surface cleanup errors.
+
 ## 0.4.3 (candidate for review)
 
 ### Improved

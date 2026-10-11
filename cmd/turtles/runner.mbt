@@ -50,7 +50,7 @@ async fn probe_group_timeout(temp : String) -> String? {
 #cfg(platform="windows")
 fn probe_group_timeout(_temp : String) -> String? {
   // Windows has a different built-in command named `timeout`; never invoke it
-  // with GNU timeout's arguments or claim process-group cancellation support.
+  // with GNU timeout's arguments. Windows commands use a scoped Job Object.
   None
 }
 
@@ -59,6 +59,7 @@ fn probe_group_timeout(_temp : String) -> String? {
 /// child exit status. Process::wait_pid returns negative signal numbers when
 /// the wrapper itself is signalled; for positive 137, require GNU timeout's
 /// verbose diagnostic before treating it as a timeout.
+#cfg(not(platform="windows"))
 fn group_timeout_result(
   exit_code : Int?,
   helper_sent_kill : Bool,
@@ -73,11 +74,13 @@ fn group_timeout_result(
 }
 
 ///|
+#cfg(not(platform="windows"))
 fn group_timeout_sent_kill(log : String) -> Bool {
   log.contains("sending signal KILL to command")
 }
 
 ///|
+#cfg(not(platform="windows"))
 async fn run_moon_command(
   root : String,
   args : Array[String],
@@ -135,6 +138,260 @@ async fn run_moon_command(
     None => CommandTimeout
     Some(0) => CommandSuccess
     Some(_) => CommandFailure
+  }
+}
+
+///|
+#cfg(platform="windows")
+#external
+priv type WindowsProcess
+
+///|
+#cfg(platform="windows")
+#borrow(command_line, working_directory, output_path)
+extern "C" fn windows_spawn_scoped_process(
+  command_line : String,
+  working_directory : String,
+  output_path : String,
+) -> WindowsProcess = "turtles_windows_spawn_scoped_process"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_process_is_null(process : WindowsProcess) -> Bool = "turtles_windows_process_is_null"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_process_is_exited(process : WindowsProcess) -> Int = "turtles_windows_process_is_exited"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_process_exit_code(process : WindowsProcess) -> Int = "turtles_windows_process_exit_code"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_job_active_processes(process : WindowsProcess) -> Int = "turtles_windows_job_active_processes"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_job_terminate(process : WindowsProcess) -> Int = "turtles_windows_job_terminate"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_job_members_exited(process : WindowsProcess) -> Int = "turtles_windows_job_members_exited"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_process_close(process : WindowsProcess) -> Int = "turtles_windows_process_close"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_process_last_error() -> Int = "turtles_windows_process_last_error"
+
+///|
+#cfg(platform="windows")
+fn windows_error(operation : String) -> String {
+  "\{operation} failed (Win32 error \{windows_process_last_error()})"
+}
+
+///|
+#cfg(platform="windows")
+fn StringBuilder::write_windows_escaped_arg(
+  builder : StringBuilder,
+  arg : StringView,
+) -> Unit {
+  if arg is "" {
+    builder.write("\"\"")
+    return
+  }
+  let need_quote = for char in arg.code_units() {
+    if char is (' ' | '\t' | '"' | 0) {
+      break true
+    }
+  } nobreak {
+    false
+  }
+  if !need_quote {
+    builder.write_stringview(arg)
+    return
+  }
+  let mut segment_start = 0
+  let mut index = 0
+  let mut trailing_backslash = 0
+  fn flush(skip : Int) {
+    if index > segment_start {
+      builder.write_stringview(arg[segment_start:index - trailing_backslash])
+      if trailing_backslash > 0 {
+        builder.write_string(String::make(trailing_backslash * 2, '\\'))
+      }
+    }
+    segment_start = index + skip
+    trailing_backslash = 0
+  }
+
+  builder.write_char('"')
+  while index < arg.length() {
+    match arg.code_unit_at(index) {
+      0 => break
+      '"' => {
+        flush(1)
+        builder.write("\\\"")
+      }
+      '\\' => trailing_backslash += 1
+      _ => trailing_backslash = 0
+    }
+    index += 1
+  }
+  flush(0)
+  builder.write_char('"')
+}
+
+///|
+#cfg(platform="windows")
+fn windows_moon_command_line(args : Array[String]) -> String {
+  let command_line = StringBuilder()
+  command_line.write_windows_escaped_arg("moon.exe")
+  for arg in args {
+    command_line..write_char(' ').write_windows_escaped_arg(arg)
+  }
+  command_line.to_string()
+}
+
+///|
+#cfg(platform="windows")
+async fn windows_wait_for_process_tree(process : WindowsProcess) -> Int {
+  let mut exit_code : Int? = None
+  while true {
+    if exit_code is None {
+      let is_exited = windows_process_is_exited(process)
+      if is_exited < 0 {
+        fail(windows_error("checking moon.exe process status"))
+      }
+      if is_exited == 1 {
+        let code = windows_process_exit_code(process)
+        if windows_process_last_error() != 0 {
+          fail(windows_error("reading moon.exe exit status"))
+        }
+        exit_code = Some(code)
+      }
+    }
+    let active = windows_job_active_processes(process)
+    if active < 0 {
+      fail(windows_error("checking moon.exe job status"))
+    }
+    if exit_code is Some(code) && active == 0 {
+      return code
+    }
+    @async.sleep(25)
+  } nobreak {
+    fail("moon.exe process wait ended without an exit status")
+  }
+}
+
+///|
+#cfg(platform="windows")
+async fn windows_wait_for_empty_job(process : WindowsProcess) -> Int {
+  // Wait on retained handles for every verified job member. Job accounting
+  // can reach zero before Windows signals the corresponding process handles.
+  // Keep a finite poll budget so cleanup still reaches its close/error path.
+  let mut attempts = 400
+  while attempts > 0 {
+    let exited = windows_job_members_exited(process)
+    if exited < 0 {
+      return -1
+    }
+    if exited == 1 {
+      return 1
+    }
+    @async.sleep(25)
+    attempts = attempts - 1
+  } nobreak {
+    0
+  }
+}
+
+///|
+#cfg(platform="windows")
+async fn windows_cleanup_process(process : WindowsProcess) -> Unit {
+  let mut cleanup_error : String? = None
+  if windows_job_terminate(process) < 0 {
+    cleanup_error = Some(
+      windows_error("capturing and terminating the moon.exe job"),
+    )
+  }
+  if cleanup_error is None {
+    let empty = windows_wait_for_empty_job(process)
+    match empty {
+      1 => ()
+      0 =>
+        cleanup_error = Some(
+          "Windows process job still had members after ten seconds",
+        )
+      _ =>
+        cleanup_error = Some(
+          windows_error("waiting for the moon.exe job members"),
+        )
+    }
+  }
+  let close_status = windows_process_close(process)
+  if close_status < 0 && cleanup_error is None {
+    cleanup_error = Some(windows_error("closing the moon.exe job"))
+  }
+  if cleanup_error is Some(message) {
+    fail(message)
+  }
+}
+
+///|
+#cfg(platform="windows")
+async fn run_moon_command(
+  root : String,
+  args : Array[String],
+  timeout_ms : Int,
+  _timeout_command : String?,
+  target? : String? = None,
+) -> CommandResult {
+  let command_args = moon_args(args, target)
+  let process = windows_spawn_scoped_process(
+    windows_moon_command_line(command_args),
+    root,
+    root + "-moon-output.log",
+  )
+  if windows_process_is_null(process) {
+    fail(windows_error("starting moon.exe in a scoped Windows job"))
+  }
+  let wait_result = @async.handle_cancellation(() => {
+    @async.with_timeout_opt(timeout_ms, () => {
+      windows_wait_for_process_tree(process)
+    })
+  }) catch {
+    error => {
+      let message = "\{error}"
+      @async.protect_from_cancel() <| () => { windows_cleanup_process(process) }
+      fail("Windows moon.exe wait failed: \{message}")
+    }
+  }
+  match wait_result {
+    None => {
+      // Parent cancellation must clean the process job before it propagates.
+      @async.protect_from_cancel() <| () => { windows_cleanup_process(process) }
+      @async.sleep(0)
+      fail("Windows process cancellation completed without propagating")
+    }
+    Some(None) => {
+      @async.protect_from_cancel() <| () => { windows_cleanup_process(process) }
+      CommandTimeout
+    }
+    Some(Some(exit_code)) => {
+      let status = windows_process_close(process)
+      if status < 0 {
+        fail(windows_error("closing the moon.exe process job"))
+      }
+      if exit_code == 0 {
+        CommandSuccess
+      } else {
+        CommandFailure
+      }
+    }
   }
 }
 
