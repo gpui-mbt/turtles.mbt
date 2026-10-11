@@ -22,6 +22,12 @@
 
 - Run Windows `moon.exe` commands in a scoped Job Object and terminate/wait for owned descendants on timeout or cancellation; surface cleanup errors.
 
+## 0.4.5
+
+### Fixed
+
+- Give the bounded verification companion the same Windows process-tree timeout and cancellation ownership: launch suspended, assign a kill-on-close Job Object before resume, and wait for owned descendants to exit.
+
 ## 0.4.3 (candidate for review)
 
 ### Improved
