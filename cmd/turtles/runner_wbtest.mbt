@@ -67,6 +67,44 @@ async test "GNU group timeout distinguishes expiry from child exit 137" {
 }
 
 ///|
+/// The native Darwin supervisor must preserve ordinary command statuses;
+/// only its private timeout marker turns a command into TIMEOUT.
+#cfg(all(target="native", not(platform="windows")))
+test "Darwin process-group supervisor preserves child exit status" {
+  if turtles_is_darwin() {
+    assert_eq(
+      turtles_darwin_supervise(
+        3000,
+        encode_supervisor_argv(["/bin/sh", "-c", "exit 0"]),
+      ),
+      0,
+    )
+    assert_eq(
+      turtles_darwin_supervise(
+        3000,
+        encode_supervisor_argv(["/bin/sh", "-c", "exit 7"]),
+      ),
+      7,
+    )
+  }
+}
+
+///|
+/// An exec failure is reported as an ordinary failed command, not as a
+/// supervisor-cleanup error that aborts the whole mutation run.
+#cfg(all(target="native", not(platform="windows")))
+test "Darwin process-group supervisor preserves exec failure status" {
+  if turtles_is_darwin() {
+    let status = turtles_darwin_supervise(
+      3000,
+      encode_supervisor_argv(["/dev/null"]),
+    )
+    assert_eq(status, 127)
+    assert_true(darwin_supervisor_result(Some(status), "") == CommandFailure)
+  }
+}
+
+///|
 /// Cancellation can happen to a worker while its configured command timeout
 /// is still pending. The process tree must be cleaned before that worker
 /// propagates cancellation to its parent.

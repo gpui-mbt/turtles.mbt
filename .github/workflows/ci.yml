@@ -390,7 +390,7 @@ jobs:
           set -euo pipefail
           fallback_path="$HOME/.moon/bin:/usr/bin:/bin:/usr/sbin:/sbin"
           if PATH="$fallback_path" /bin/sh -c 'command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1'; then
-            echo "expected the macOS single-process timeout fallback to be exercised" >&2
+            echo "expected the Darwin process-group timeout fallback to be exercised" >&2
             exit 1
           fi
           report="$RUNNER_TEMP/turtles-report.json"
@@ -403,13 +403,15 @@ jobs:
               report = json.load(handle)
 
           assert report["schema"] == 3
-          assert report["turtles_version"] == "0.4.4"
+          assert report["turtles_version"] == "0.4.5"
           assert len(report["mutants"]) == 6
           assert report["summary"]["killed"] == 6
           assert report["summary"]["survived"] == 0
           assert report["summary"]["timeout"] == 0
           assert all("duration_ms" in mutant for mutant in report["mutants"])
           PY
+      - name: Verify Darwin timeout and cancellation descendant cleanup
+        run: python3 scripts/darwin_timeout_smoke.py
 
   windows-native:
     runs-on: windows-2025

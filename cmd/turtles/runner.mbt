@@ -81,6 +81,102 @@ fn group_timeout_sent_kill(log : String) -> Bool {
 
 ///|
 #cfg(not(platform="windows"))
+let darwin_supervisor_flag : String = "--__turtles_darwin_timeout_supervisor"
+
+///|
+#cfg(not(platform="windows"))
+let darwin_supervisor_timeout_marker : String = "[turtles:darwin-supervisor] command timed out"
+
+///|
+#cfg(not(platform="windows"))
+let darwin_supervisor_error_marker : String = "[turtles:darwin-supervisor] process-group cleanup failed"
+
+///|
+#cfg(not(platform="windows"))
+extern "C" fn turtles_is_darwin() -> Bool = "turtles_is_darwin"
+
+///|
+#cfg(not(platform="windows"))
+extern "C" fn turtles_darwin_executable_path() -> String = "turtles_darwin_executable_path"
+
+///|
+#cfg(not(platform="windows"))
+#borrow(argv)
+extern "C" fn turtles_darwin_supervise(timeout_ms : Int, argv : Bytes) -> Int = "turtles_darwin_supervise"
+
+///|
+#cfg(not(platform="windows"))
+fn encode_supervisor_argv(args : Array[String]) -> Bytes {
+  let encoded = @buffer.Buffer()
+  for arg in args {
+    encoded.write_string_utf8(arg[:])
+    encoded.write_byte(b'\x00')
+  }
+  encoded.to_bytes()
+}
+
+///|
+#cfg(not(platform="windows"))
+async fn darwin_supervisor_entry(args : Array[String]) -> Int {
+  guard turtles_is_darwin() else {
+    fail("the Darwin process supervisor is unavailable on this host")
+  }
+  guard args.length() >= 5 && args[1] == darwin_supervisor_flag else {
+    fail("invalid internal Darwin process supervisor arguments")
+  }
+  let timeout_ms = @string.parse_int(args[2]) catch {
+    _ => fail("invalid internal Darwin process supervisor timeout")
+  }
+  guard timeout_ms > 0 && args[3] == "--" && args[4] == "moon" else {
+    fail("invalid internal Darwin process supervisor command")
+  }
+  let child_args : Array[String] = []
+  for index = 4; index < args.length(); index = index + 1 {
+    child_args.push(args[index])
+  }
+  let result = turtles_darwin_supervise(
+    timeout_ms,
+    encode_supervisor_argv(child_args),
+  )
+  match result {
+    -2 => {
+      @stdio.stderr.write(darwin_supervisor_timeout_marker + "\n")
+      124
+    }
+    -3 => 143
+    -1 => {
+      @stdio.stderr.write(darwin_supervisor_error_marker + "\n")
+      125
+    }
+    status if status >= 0 && status <= 255 => status
+    _ => {
+      @stdio.stderr.write(darwin_supervisor_error_marker + "\n")
+      125
+    }
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+fn darwin_supervisor_result(
+  exit_code : Int?,
+  log : String,
+) -> CommandResult raise {
+  if log.contains(darwin_supervisor_error_marker) {
+    fail("Darwin process-group supervisor failed; see the moon output log")
+  }
+  if log.contains(darwin_supervisor_timeout_marker) {
+    return CommandTimeout
+  }
+  match exit_code {
+    None => CommandTimeout
+    Some(0) => CommandSuccess
+    Some(_) => CommandFailure
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
 async fn run_moon_command(
   root : String,
   args : Array[String],
@@ -123,6 +219,38 @@ async fn run_moon_command(
       false
     }
     return group_timeout_result(exit_code, helper_sent_kill)
+  }
+  if turtles_is_darwin() {
+    // Without coreutils, re-exec this binary as a small Darwin supervisor.
+    // It owns a process group around moon so cancelling the helper cannot
+    // leave Moon's compiler or test executables running in the background.
+    let executable = turtles_darwin_executable_path()
+    guard executable != "" else {
+      fail(
+        "could not resolve turtles executable path for Darwin timeout supervisor",
+      )
+    }
+    let supervisor_args : Array[String] = [
+      darwin_supervisor_flag,
+      timeout_ms.to_string(),
+      "--",
+      "moon",
+    ]
+    for arg in command_args {
+      supervisor_args.push(arg)
+    }
+    let exit_code = @async.with_timeout_opt(timeout_ms + 5000, () => {
+      @process.run(
+        executable,
+        supervisor_args,
+        cwd=root,
+        stdout=output,
+        stderr=output,
+        cancel_handler=@process.graceful_cancel(timeout=1000),
+      )
+    })
+    let log = @fs.read_file(root + "-moon-output.log").text() catch { _ => "" }
+    return darwin_supervisor_result(exit_code, log)
   }
   let exit_code = @async.with_timeout_opt(timeout_ms, () => {
     @process.run(

@@ -16,6 +16,12 @@
 
 ### Migration
 
+## 0.4.5
+
+### Fixed
+
+- On macOS without GNU coreutils, supervise `moon` in a process group and terminate same-group descendants on timeout or cancellation instead of leaving compiler/test processes running.
+
 ## 0.4.4
 
 ### Fixed
