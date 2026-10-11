@@ -200,6 +200,60 @@ def main() -> None:
     ):
         raise SystemExit("the fallback PATH unexpectedly contains GNU timeout")
 
+    # The runner's native whitebox test binary has its own generated argument
+    # parser. This filtered test launches the private supervisor from inside
+    # that binary while it checks a pristine Moon baseline; the C constructor
+    # must dispatch before the generated parser sees the private arguments.
+    test_result = run(
+        [
+            moon,
+            "test",
+            "cmd/turtles/runner_wbtest.mbt",
+            "--target",
+            "native",
+            "--filter",
+            "native target selects native-only tests for classification",
+            "--deny-warn",
+        ],
+        env=environment,
+        cwd=ROOT,
+    )
+    assert_success(test_result, "no-timeout runner test-driver integration")
+
+    test_driver = ROOT / "_build" / "native" / "debug" / "test" / "cmd" / "turtles" / "turtles.whitebox_test.exe"
+    if not test_driver.is_file():
+        raise SystemExit(f"native turtles whitebox test driver not found at {test_driver}")
+    driver_command = [
+        str(test_driver),
+        "--__turtles_darwin_timeout_supervisor",
+        "3000",
+        "--",
+        "moon",
+        "--version",
+    ]
+    driver_result = run(driver_command, env=environment, cwd=ROOT)
+    assert_success(driver_result, "generated test-driver supervisor entry")
+    if "moon " not in driver_result.stdout:
+        raise SystemExit("generated test-driver supervisor did not preserve moon output")
+    invalid_result = run(
+        [
+            str(test_driver),
+            "--__turtles_darwin_timeout_supervisor",
+            "0",
+            "--",
+            "moon",
+            "--version",
+        ],
+        env=environment,
+        cwd=ROOT,
+    )
+    if invalid_result.returncode != 125 or "invalid supervisor timeout" not in invalid_result.stderr:
+        raise SystemExit(
+            "generated test-driver supervisor did not reject an invalid timeout "
+            f"deterministically (exit {invalid_result.returncode})\n"
+            f"stdout:\n{invalid_result.stdout}\nstderr:\n{invalid_result.stderr}"
+        )
+
     with tempfile.TemporaryDirectory(prefix="turtles-darwin-timeout-") as temp:
         work = Path(temp)
         helper = work / "persistent_child.py"

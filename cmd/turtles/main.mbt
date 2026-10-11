@@ -1,16 +1,4 @@
 ///|
-#cfg(not(platform="windows"))
-async fn execute() -> Int {
-  let args = @env.args()
-  if args.length() >= 2 && args[1] == darwin_supervisor_flag {
-    return darwin_supervisor_entry(args)
-  }
-  let config = parse_args(args)
-  execute_with_config(config)
-}
-
-///|
-#cfg(platform="windows")
 async fn execute() -> Int {
   let config = parse_args(@env.args())
   execute_with_config(config)

@@ -6,6 +6,7 @@
 
 #if defined(__APPLE__)
 
+#include <crt_externs.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -22,6 +23,11 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+#define TURTLES_DARWIN_SUPERVISOR_FLAG "--__turtles_darwin_timeout_supervisor"
+#define TURTLES_DARWIN_TIMEOUT_MARKER "[turtles:darwin-supervisor] command timed out"
+#define TURTLES_DARWIN_ERROR_MARKER "[turtles:darwin-supervisor] process-group cleanup failed"
+#define TURTLES_DARWIN_MAX_ARGC 65536
 
 extern char **environ;
 
@@ -155,20 +161,25 @@ moonbit_string_t turtles_darwin_executable_path(void) {
 
 static char **turtles_darwin_unpack_argv(moonbit_bytes_t packed, int *argc) {
   int32_t length = Moonbit_array_length(packed);
-  if (length <= 0 || packed[length - 1] != 0)
+  if (length <= 0 || packed[length - 1] != 0) {
+    errno = EINVAL;
     return NULL;
+  }
   int count = 0;
   for (int32_t i = 0; i < length; ++i)
     if (packed[i] == 0)
       ++count;
-  if (count == 0)
+  if (count == 0 || count > TURTLES_DARWIN_MAX_ARGC) {
+    errno = E2BIG;
     return NULL;
+  }
 
   char **argv = (char **)calloc((size_t)count + 1, sizeof(char *));
   char *storage = (char *)malloc((size_t)length);
   if (argv == NULL || storage == NULL) {
     free(argv);
     free(storage);
+    errno = ENOMEM;
     return NULL;
   }
   memcpy(storage, packed, (size_t)length);
@@ -180,6 +191,47 @@ static char **turtles_darwin_unpack_argv(moonbit_bytes_t packed, int *argc) {
   }
   argv[count] = NULL;
   *argc = count;
+  return argv;
+}
+
+static char **turtles_darwin_copy_argv(int argc, const char *const source[]) {
+  if (argc < 1 || argc > TURTLES_DARWIN_MAX_ARGC || source == NULL) {
+    errno = E2BIG;
+    return NULL;
+  }
+
+  size_t storage_length = 0;
+  for (int i = 0; i < argc; ++i) {
+    if (source[i] == NULL) {
+      errno = EINVAL;
+      return NULL;
+    }
+    size_t argument_length = strlen(source[i]);
+    if (argument_length == SIZE_MAX ||
+        storage_length > SIZE_MAX - argument_length - 1) {
+      errno = EOVERFLOW;
+      return NULL;
+    }
+    storage_length += argument_length + 1;
+  }
+
+  char **argv = (char **)calloc((size_t)argc + 1, sizeof(char *));
+  char *storage = (char *)malloc(storage_length);
+  if (argv == NULL || storage == NULL) {
+    free(argv);
+    free(storage);
+    errno = ENOMEM;
+    return NULL;
+  }
+
+  char *cursor = storage;
+  for (int i = 0; i < argc; ++i) {
+    size_t argument_length = strlen(source[i]) + 1;
+    argv[i] = cursor;
+    memcpy(cursor, source[i], argument_length);
+    cursor += argument_length;
+  }
+  argv[argc] = NULL;
   return argv;
 }
 
@@ -404,11 +456,9 @@ static void turtles_darwin_restore_handler(
   (void)sigaction(signal_number, previous, NULL);
 }
 
-int32_t turtles_darwin_supervise(int32_t timeout_ms, moonbit_bytes_t packed) {
+static int turtles_darwin_supervise_command(int32_t timeout_ms, char **argv) {
   int error_number = 0;
   int result = -1;
-  int argc = 0;
-  char **argv = NULL;
   char *executable = NULL;
   int exec_pipe[2] = { -1, -1 };
   pid_t child = -1;
@@ -464,8 +514,7 @@ int32_t turtles_darwin_supervise(int32_t timeout_ms, moonbit_bytes_t packed) {
   default_action.sa_handler = SIG_DFL;
   sigemptyset(&default_action.sa_mask);
 
-  argv = turtles_darwin_unpack_argv(packed, &argc);
-  if (argv == NULL || argc < 1 || argv[0][0] == '\0') {
+  if (argv == NULL || argv[0] == NULL || argv[0][0] == '\0') {
     error_number = EINVAL;
     goto cleanup;
   }
@@ -689,6 +738,111 @@ cleanup:
   return result;
 }
 
+moonbit_string_t turtles_darwin_supervisor_flag(void) {
+  return turtles_darwin_utf8_to_string(
+    (const unsigned char *)TURTLES_DARWIN_SUPERVISOR_FLAG,
+    sizeof(TURTLES_DARWIN_SUPERVISOR_FLAG) - 1);
+}
+
+moonbit_string_t turtles_darwin_supervisor_timeout_marker(void) {
+  return turtles_darwin_utf8_to_string(
+    (const unsigned char *)TURTLES_DARWIN_TIMEOUT_MARKER,
+    sizeof(TURTLES_DARWIN_TIMEOUT_MARKER) - 1);
+}
+
+moonbit_string_t turtles_darwin_supervisor_error_marker(void) {
+  return turtles_darwin_utf8_to_string(
+    (const unsigned char *)TURTLES_DARWIN_ERROR_MARKER,
+    sizeof(TURTLES_DARWIN_ERROR_MARKER) - 1);
+}
+
+int32_t turtles_darwin_supervise(int32_t timeout_ms, moonbit_bytes_t packed) {
+  int argc = 0;
+  char **argv = turtles_darwin_unpack_argv(packed, &argc);
+  if (argv == NULL)
+    return -1;
+  (void)argc;
+  return turtles_darwin_supervise_command(timeout_ms, argv);
+}
+
+static bool turtles_darwin_parse_timeout(const char *text, int32_t *timeout_ms) {
+  if (text == NULL || text[0] == '\0')
+    return false;
+  int64_t value = 0;
+  for (const unsigned char *cursor = (const unsigned char *)text;
+       *cursor != '\0';
+       ++cursor) {
+    if (*cursor < '0' || *cursor > '9')
+      return false;
+    int digit = *cursor - '0';
+    if (value > (INT32_MAX - digit) / 10)
+      return false;
+    value = value * 10 + digit;
+  }
+  if (value <= 0)
+    return false;
+  *timeout_ms = (int32_t)value;
+  return true;
+}
+
+static void turtles_darwin_internal_mode_error(const char *detail) {
+  (void)dprintf(
+    STDERR_FILENO,
+    "%s: %s\n",
+    TURTLES_DARWIN_ERROR_MARKER,
+    detail);
+  _exit(125);
+}
+
+static void turtles_darwin_dispatch_supervisor(void) __attribute__((constructor));
+
+static void turtles_darwin_dispatch_supervisor(void) {
+  int *argc_pointer = _NSGetArgc();
+  char ***argv_pointer = _NSGetArgv();
+  if (argc_pointer == NULL || argv_pointer == NULL || *argv_pointer == NULL)
+    return;
+
+  int argc = *argc_pointer;
+  char **process_argv = *argv_pointer;
+  if (argc < 2 || process_argv[1] == NULL ||
+      strcmp(process_argv[1], TURTLES_DARWIN_SUPERVISOR_FLAG) != 0)
+    return;
+
+  /* Once the reserved flag is present, fail deterministically on malformed
+   * requests instead of passing the private arguments to a generated test
+   * driver's unrelated command-line parser. */
+  if (argc < 5 || argc > TURTLES_DARWIN_MAX_ARGC ||
+      process_argv[2] == NULL || process_argv[3] == NULL ||
+      process_argv[4] == NULL || strcmp(process_argv[3], "--") != 0 ||
+      strcmp(process_argv[4], "moon") != 0) {
+    turtles_darwin_internal_mode_error("invalid supervisor arguments");
+  }
+
+  int32_t timeout_ms = 0;
+  if (!turtles_darwin_parse_timeout(process_argv[2], &timeout_ms))
+    turtles_darwin_internal_mode_error("invalid supervisor timeout");
+
+  int command_argc = argc - 4;
+  char **command_argv = turtles_darwin_copy_argv(
+    command_argc,
+    (const char *const *)(process_argv + 4));
+  if (command_argv == NULL)
+    turtles_darwin_internal_mode_error("could not copy supervisor arguments");
+
+  int result = turtles_darwin_supervise_command(timeout_ms, command_argv);
+  if (result == -2) {
+    (void)dprintf(STDERR_FILENO, "%s\n", TURTLES_DARWIN_TIMEOUT_MARKER);
+    _exit(124);
+  }
+  if (result == -3)
+    _exit(143);
+  if (result >= 0 && result <= 255)
+    _exit(result);
+  if (result != -1)
+    turtles_darwin_internal_mode_error("invalid supervisor result");
+  _exit(125);
+}
+
 #else
 
 int32_t turtles_is_darwin(void) {
@@ -696,6 +850,18 @@ int32_t turtles_is_darwin(void) {
 }
 
 moonbit_string_t turtles_darwin_executable_path(void) {
+  return moonbit_make_string_raw(0);
+}
+
+moonbit_string_t turtles_darwin_supervisor_flag(void) {
+  return moonbit_make_string_raw(0);
+}
+
+moonbit_string_t turtles_darwin_supervisor_timeout_marker(void) {
+  return moonbit_make_string_raw(0);
+}
+
+moonbit_string_t turtles_darwin_supervisor_error_marker(void) {
   return moonbit_make_string_raw(0);
 }
 

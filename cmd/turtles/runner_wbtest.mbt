@@ -1,4 +1,20 @@
 ///|
+#cfg(all(target="native", not(platform="windows")))
+#borrow(argv)
+extern "C" fn turtles_darwin_supervise(timeout_ms : Int, argv : Bytes) -> Int = "turtles_darwin_supervise"
+
+///|
+#cfg(all(target="native", not(platform="windows")))
+fn encode_supervisor_argv(args : Array[String]) -> Bytes {
+  let encoded = @buffer.Buffer()
+  for arg in args {
+    encoded.write_string_utf8(arg[:])
+    encoded.write_byte(b'\x00')
+  }
+  encoded.to_bytes()
+}
+
+///|
 // The timeout probe must survive an absent `timeout` executable, then select
 // the next candidate. Absolute paths make this test independent of PATH.
 #cfg(all(target="native", not(platform="windows")))
