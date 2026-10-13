@@ -450,9 +450,21 @@ jobs:
         run: moon update
       - name: Test standalone MoonBit validator
         run: moon test scripts/self_report.mbtx
+      - name: Run Python-free binary self-E2E
+        run: sh scripts/self_e2e.sh
 
   published-cli-no-checkout:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x86_64
+            sha256: 232d184f4569728d74e4dbcbb3bd6fec92f05ebb5f82ab8b95dab8221cd0854c
+          - os: macos-15
+            platform: darwin-aarch64
+            sha256: 341f81f9bbd0db153627f8740940d48ad5d24ea54af5dc1c03fe8cd5528753da
+    runs-on: ${{ matrix.os }}
     steps:
       # Never check out this repository: the published package must be usable
       # from an unrelated MoonBit module without its Python dev scripts.
@@ -468,8 +480,12 @@ jobs:
         run: |
           set -euo pipefail
           asset="$HOME/.moon/bin/turtles"
-          curl -fsSL "https://github.com/gpui-mbt/turtles.mbt/releases/download/v0.4.6/turtles-linux-x86_64" -o "$asset"
-          echo "232d184f4569728d74e4dbcbb3bd6fec92f05ebb5f82ab8b95dab8221cd0854c  $asset" | sha256sum -c -
+          curl -fsSL "https://github.com/gpui-mbt/turtles.mbt/releases/download/v0.4.6/turtles-${{ matrix.platform }}" -o "$asset"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            echo "${{ matrix.sha256 }}  $asset" | shasum -a 256 -c -
+          else
+            echo "${{ matrix.sha256 }}  $asset" | sha256sum -c -
+          fi
           chmod +x "$asset"
       - name: Run standalone consumer fixture with Python blocked
         shell: bash
