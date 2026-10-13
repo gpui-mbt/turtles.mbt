@@ -35,8 +35,6 @@ jobs:
         run: moon check --target native --deny-warn
       - name: Unit tests
         run: moon test --target native
-      - name: Standalone MoonBit E2E report validator tests
-        run: moon test scripts/self_report.mbtx
       - name: Offline verification-profile adversarial tests
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Run fixture baseline
@@ -440,6 +438,17 @@ jobs:
       - name: Run native fixtures, parallel workers, and target filtering
         run: python scripts/windows_smoke.py
 
+  mbtx-validator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Test standalone MoonBit validator
+        run: moon test scripts/self_report.mbtx
+
   published-cli-no-checkout:
     runs-on: ubuntu-latest
     steps:
@@ -449,8 +458,17 @@ jobs:
         run: |
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
-      - name: Install pinned Mooncakes CLI
-        run: moon install f4ah6o/turtles/cmd/turtles@0.4.6
+      # The Mooncakes 0.4.6 source package currently fails to resolve the
+      # legacy prettyprinter@0.4.10 manifest under moon 0.1.20261012.
+      # Check the published native asset independently of that known blocker.
+      - name: Download checksum-verified native release CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="$HOME/.moon/bin/turtles"
+          curl -fsSL "https://github.com/gpui-mbt/turtles.mbt/releases/download/v0.4.6/turtles-linux-x86_64" -o "$asset"
+          echo "232d184f4569728d74e4dbcbb3bd6fec92f05ebb5f82ab8b95dab8221cd0854c  $asset" | sha256sum -c -
+          chmod +x "$asset"
       - name: Run standalone consumer fixture with Python blocked
         shell: bash
         run: |

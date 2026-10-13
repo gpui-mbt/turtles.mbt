@@ -20,6 +20,8 @@ moon install f4ah6o/turtles/cmd/turtles@0.4.6
 
 The installed `turtles` executable does not run any of the repository's `scripts/*.py` files. Those scripts are for contributor CI, release verification, platform regressions, and an optional experimental proof companion, not for mutation testing users. `.mbtx` is useful for standalone MoonBit automation (including our self-E2E validator), but it is not needed to launch this native CLI. `moonx` runs published Wasm executables; `cmd/turtles` currently supports native only and uses native process-control stubs, so use `moon install` or the native release asset rather than `moonx`.
 
+For an environment where `moon install` encounters the obsolete `moon.mod.json` dependency error in the published 0.4.6 source (observed with moon 0.1.20261012), use the checksum-verified native binary from the [v0.4.6 release assets](https://github.com/gpui-mbt/turtles.mbt/releases/tag/v0.4.6) until a corrected package version is published. This still needs `moon` on `PATH` to run mutations. The source compatibility fix is tracked in [PR #42](https://github.com/gpui-mbt/turtles.mbt/pull/42).
+
 ### Development — GitHub
 
 ```sh

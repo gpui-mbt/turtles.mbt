@@ -38,8 +38,12 @@ for a portable, clone-free CLI. Avoid a risky bulk translation.
 
 ## Acceptance criteria
 
-- A published CLI installs and runs from an unrelated directory with
-  Python commands blocked and without checking out turtles.
+- A published native release executable runs from an unrelated directory
+  with Python commands blocked and without checking out turtles.
+- A separately published, updated Mooncakes package resolves all its
+  dependencies under the current MoonBit toolchain before claiming registry
+  install compatibility; do not equate a working native asset with a working
+  Mooncakes source-package install.
 - For each ported script, positive **and** negative cases run in CI;
   platform-specific runs remain on the corresponding runners.
 - Existing Python test gates are retained until MoonBit replacements pass.
