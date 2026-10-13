@@ -10,13 +10,13 @@ import {
 fn valid_fixture_report(report : Json) -> Bool {
   match report {
     {
-      "schema": Number(schema),
+      "schema": Number(schema, ..),
       "mutants": Array(mutants),
       "summary": {
-        "killed": Number(killed),
-        "survived": Number(survived),
-        "timeout": Number(timeout),
-        "unviable": Number(unviable),
+        "killed": Number(killed, ..),
+        "survived": Number(survived, ..),
+        "timeout": Number(timeout, ..),
+        "unviable": Number(unviable, ..),
         ..
       },
       ..
