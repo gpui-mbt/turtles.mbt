@@ -20,4 +20,5 @@ import {
   "moonbitlang/parser@0.4.0",
   "moonbitlang/moon_config@0.4.0",
   "moonbitlang/x@0.5.5",
+  "moonbit-community/prettyprinter@0.4.11",
 }
