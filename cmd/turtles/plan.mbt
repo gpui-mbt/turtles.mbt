@@ -74,7 +74,7 @@ struct PlanBuilder {
   /// positional `.mbt` inputs observed on build-package lines, in order
   raw_sources : Array[String]
   /// how many `moonc build-package` lines the plan contained
-  mut build_package_lines : Int
+  mut build_package_lines : Int32
 }
 
 ///|
@@ -460,7 +460,7 @@ fn PlanBuilder::active_sources(
 /// a target-aware plan can never disagree with itself.
 async fn load_moon_plan(
   reference : String,
-  target? : String? = None,
+  target~ : String? = None,
 ) -> MoonPlan {
   let log = reference + "-plan.log"
   let output = @process.redirect_to_file(log)

@@ -1,7 +1,7 @@
 ///|
 /// Byte offset of ASCII `needle` inside `text` — mutation spans are byte
 /// offsets, so test mutations are anchored the same way the scanner's are.
-fn byte_offset_of(text : String, needle : String) -> Int {
+fn byte_offset_of(text : String, needle : String) -> Int32 {
   let bytes = @utf8.encode(text)
   let n = @utf8.encode(needle)
   let mut i = 0
@@ -17,8 +17,8 @@ fn byte_offset_of(text : String, needle : String) -> Int {
 ///|
 fn span_mutation(
   path : String,
-  start : Int,
-  end : Int,
+  start : Int32,
+  end : Int32,
   original : String,
 ) -> Mutation {
   {

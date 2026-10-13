@@ -12,10 +12,10 @@ The supported way to install `turtles` is `moon install`, which builds the nativ
 
 ### Stable — Mooncakes
 
-The registry package is the default install path. The 0.4.6 package's pinned install command is:
+The registry package is the default install path. The 0.4.7 package's pinned install command is:
 
 ```sh
-moon install f4ah6o/turtles/cmd/turtles@0.4.6
+moon install f4ah6o/turtles/cmd/turtles@0.4.7
 ```
 
 ### Development — GitHub
@@ -27,7 +27,7 @@ moon install https://github.com/gpui-mbt/turtles.mbt.git cmd/turtles --branch ma
 Install from the matching source tag after it is created:
 
 ```sh
-moon install https://github.com/gpui-mbt/turtles.mbt.git cmd/turtles --tag v0.4.6
+moon install https://github.com/gpui-mbt/turtles.mbt.git cmd/turtles --tag v0.4.7
 ```
 
 ### From a local clone
@@ -39,7 +39,7 @@ moon install ./cmd/turtles
 ## First run in 30 seconds
 
 ```sh
-turtles --version          # turtles 0.4.6 for this source release
+turtles --version          # turtles 0.4.7 for this source release
 turtles --help
 
 cd path/to/your-moonbit-module
@@ -84,7 +84,7 @@ Note that `moon` itself already parallelizes a single build; `--jobs` paralleliz
 Install a pinned release and run turtles against your module:
 
 ```sh
-moon install f4ah6o/turtles/cmd/turtles@0.4.6
+moon install f4ah6o/turtles/cmd/turtles@0.4.7
 turtles --dir . --fail-under 80 --json turtles-report.json
 ```
 
@@ -144,7 +144,7 @@ Every run writes a schema-`3` report and per-survivor unified diffs to `<dir>/.t
 {
   "schema": 3,
   "module": "/abs/path",
-  "turtles_version": "0.4.6",
+  "turtles_version": "0.4.7",
   "moon_version": "moon 0.1.20260920 (914d7da 2026-09-20) ~/.moon/bin/moon",
   "target": "native",
   "inactive_mutants": 1,
@@ -282,7 +282,7 @@ JUnit reports, richer survivor context, and smarter default test selection are s
 ## Versioned native releases
 
 Edit the `version` field in `moon.mod` to the intended SemVer version
-(e.g., `0.4.5` to `0.4.6`) and merge that change into `main`.
+(e.g., `0.4.6` to `0.4.7`) and merge that change into `main`.
 The release workflow compares the previous and new **version values**, not
 just the file modification date. On a version increase it validates
 version consistency, builds four native platforms, then creates the
@@ -303,3 +303,9 @@ publishing stops and preserves it for manual repair. If tag lookup and the
 paginated release list disagree, publishing also stops for manual review.
 
 Update `cmd/turtles/config.mbt`'s `turtles_version` alongside `moon.mod`.
+
+After native publication succeeds, the workflow validates and publishes the
+same version to Mooncakes, then installs it from an unrelated directory with
+Python commands blocked and runs a mutation fixture. Configure repository
+secret `MOONCAKES_TOKEN` with a publish token or the JSON contents of
+`~/.moon/credentials.json`; the workflow fails explicitly if it is missing.

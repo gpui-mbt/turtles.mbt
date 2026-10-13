@@ -1,5 +1,7 @@
 ///|
-fn count_outcomes(results : Array[MutationResult]) -> (Int, Int, Int, Int) {
+fn count_outcomes(
+  results : Array[MutationResult],
+) -> (Int32, Int32, Int32, Int32) {
   let mut killed = 0
   let mut survived = 0
   let mut timeout = 0
@@ -16,7 +18,7 @@ fn count_outcomes(results : Array[MutationResult]) -> (Int, Int, Int, Int) {
 }
 
 ///|
-fn mutation_score(killed : Int, survived : Int, timeout : Int) -> Double {
+fn mutation_score(killed : Int32, survived : Int32, timeout : Int32) -> Double {
   let viable = killed + survived + timeout
   if viable == 0 {
     100.0
@@ -64,7 +66,7 @@ fn json_mutation(result : MutationResult) -> JsonMutation {
 /// Per-kind tallies over every recorded kill, plus the headline PBT
 /// metric: mutants whose entire kill attribution is property tests —
 /// mutants only QuickCheck could have caught.
-fn kill_counts(results : Array[MutationResult]) -> (JsonKillCounts, Int) {
+fn kill_counts(results : Array[MutationResult]) -> (JsonKillCounts, Int32) {
   let mut property = 0
   let mut snapshot = 0
   let mut doc_test = 0
@@ -162,10 +164,10 @@ fn build_report(
   skipped : Array[SkippedFile],
   files : Map[String, String],
   score : Double,
-  regressions? : Array[String] = [],
-  target? : String? = None,
-  inactive? : Array[Mutation] = [],
-  properties? : Array[String]? = None,
+  regressions~ : Array[String] = [],
+  target~ : String? = None,
+  inactive~ : Array[Mutation] = [],
+  properties~ : Array[String]? = None,
 ) -> JsonReport {
   let mutants : Array[JsonMutation] = []
   let mut reused = 0
@@ -227,7 +229,7 @@ async fn write_output_dir(
   results : Array[MutationResult],
   report : JsonReport,
   default_dir : Bool,
-  emit_regressions? : Bool = false,
+  emit_regressions~ : Bool = false,
 ) -> Unit {
   let survivors_dir = path_join(dir, "survivors")
   @fs.mkdir(survivors_dir, recursive=true, allow_exist=true)
