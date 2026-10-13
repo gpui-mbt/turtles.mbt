@@ -448,6 +448,11 @@ jobs:
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
       - name: Update MoonBit registry
         run: moon update
+      # Source checkout still resolves prettyprinter@0.4.10 without PR #42.
+      # Apply the exact pending manifest fix only in this disposable CI job
+      # to test the .mbtx integration without modifying the contributor branch.
+      - name: Temporary compatible source dependency for E2E
+        run: moon add moonbit-community/prettyprinter@0.4.11
       - name: Test standalone MoonBit validator
         run: moon test scripts/self_report.mbtx
       - name: Run Python-free binary self-E2E
