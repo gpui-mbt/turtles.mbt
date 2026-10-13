@@ -1,7 +1,7 @@
 ///|
 /// A prior run's report, distilled for --iterate reuse decisions.
 struct PriorReport {
-  schema : Int
+  schema : Int32
   turtles_version : String?
   moon_version : String?
   target : String?
@@ -89,7 +89,7 @@ async fn load_prior_report(path : String) -> PriorReport? {
 fn json_field_string_or_number(
   fields : Map[String, Json],
   name : String,
-) -> Int? {
+) -> Int32? {
   match fields.get(name) {
     Some(Number(n, ..)) => Some(n.to_int())
     _ => None
@@ -171,7 +171,7 @@ fn prior_reusable_outcome(
   mutation : Mutation,
   current_files : Map[String, String],
   moon_version : String?,
-  target? : String? = None,
+  target~ : String? = None,
 ) -> (Outcome, Array[Kill]?, Bool)? {
   if prior.schema != 3 {
     return None

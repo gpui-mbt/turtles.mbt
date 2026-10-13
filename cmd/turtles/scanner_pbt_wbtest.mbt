@@ -1,7 +1,7 @@
 ///|
 /// Fold an arbitrary integer into a valid index of `boundaries`
 /// (a non-empty array, so the modulo never divides by zero).
-fn pbt_boundary_index(raw : Int, length : Int) -> Int {
+fn pbt_boundary_index(raw : Int32, length : Int32) -> Int32 {
   (raw % length + length) % length
 }
 
@@ -32,7 +32,7 @@ test "prop source_byte_boundaries is strictly increasing and bounded" {
 
 ///|
 test "prop source_byte_offset lands inside the byte range ordered by scalar index" {
-  @quickcheck.check((input : (String, Int, Int)) => {
+  @quickcheck.check((input : (String, Int32, Int32)) => {
     let (source, raw_i, raw_j) = input
     let bytes = @utf8.encode(source)
     let boundaries = source_byte_boundaries(bytes)
@@ -50,8 +50,8 @@ test "prop source_byte_offset lands inside the byte range ordered by scalar inde
 /// range always sits on UTF-8 scalar boundaries, like scanner output.
 fn pbt_range_mutation(
   source : String,
-  raw_lo : Int,
-  raw_hi : Int,
+  raw_lo : Int32,
+  raw_hi : Int32,
   replacement : String,
 ) -> (Bytes, Mutation) raise {
   let bytes = @utf8.encode(source)
@@ -77,7 +77,7 @@ fn pbt_range_mutation(
 
 ///|
 test "prop apply_mutation with the identity replacement is a no-op" {
-  @quickcheck.check((input : (String, Int, Int)) => {
+  @quickcheck.check((input : (String, Int32, Int32)) => {
     let (source, raw_lo, raw_hi) = input
     let (_, mutation) = pbt_range_mutation(source, raw_lo, raw_hi, "")
     let mutation : Mutation = { ..mutation, replacement: mutation.original, }
@@ -87,7 +87,7 @@ test "prop apply_mutation with the identity replacement is a no-op" {
 
 ///|
 test "prop apply_mutation leaves bytes outside the recorded range untouched" {
-  @quickcheck.check((input : (String, Int, Int, String)) => {
+  @quickcheck.check((input : (String, Int32, Int32, String)) => {
     let (source, raw_lo, raw_hi, replacement) = input
     let (bytes, mutation) = pbt_range_mutation(
       source, raw_lo, raw_hi, replacement,
@@ -173,7 +173,7 @@ fn pbt_visibility_table() -> Array[(String, MutantVisibility)] {
 ///|
 test "prop mutants inherit the visibility of their enclosing declaration" {
   let table = pbt_visibility_table()
-  @quickcheck.check((raw : Int) => {
+  @quickcheck.check((raw : Int32) => {
     let (source, expected) = table[pbt_boundary_index(raw, table.length())]
     scan_source("prop.mbt", source, parse_project_config(""))
     .iter()
@@ -184,7 +184,7 @@ test "prop mutants inherit the visibility of their enclosing declaration" {
 ///|
 test "prop declared types yield exactly their trivial body replacements" {
   let table = pbt_body_table()
-  @quickcheck.check((raw : Int) => {
+  @quickcheck.check((raw : Int32) => {
     let (name, expected) = table[pbt_boundary_index(raw, table.length())]
     let source = "fn f() -> \{name} { 1 + 2 }"
     let config = parse_project_config("operators = [\"body\"]")

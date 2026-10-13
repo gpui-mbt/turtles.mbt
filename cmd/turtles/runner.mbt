@@ -61,7 +61,7 @@ fn probe_group_timeout(_temp : String) -> String? {
 /// verbose diagnostic before treating it as a timeout.
 #cfg(not(platform="windows"))
 fn group_timeout_result(
-  exit_code : Int?,
+  exit_code : Int32?,
   helper_sent_kill : Bool,
 ) -> CommandResult {
   match exit_code {
@@ -102,7 +102,7 @@ extern "C" fn turtles_darwin_executable_path() -> String = "turtles_darwin_execu
 ///|
 #cfg(not(platform="windows"))
 fn darwin_supervisor_result(
-  exit_code : Int?,
+  exit_code : Int32?,
   log : String,
 ) -> CommandResult raise {
   if log.contains(turtles_darwin_supervisor_error_marker()) {
@@ -123,9 +123,9 @@ fn darwin_supervisor_result(
 async fn run_moon_command(
   root : String,
   args : Array[String],
-  timeout_ms : Int,
+  timeout_ms : Int32,
   timeout_command : String?,
-  target? : String? = None,
+  target~ : String? = None,
 ) -> CommandResult {
   let command_args = moon_args(args, target)
   // Nested moon output must not reach our own stdout: when turtles runs
@@ -232,31 +232,31 @@ extern "C" fn windows_process_is_null(process : WindowsProcess) -> Bool = "turtl
 
 ///|
 #cfg(platform="windows")
-extern "C" fn windows_process_is_exited(process : WindowsProcess) -> Int = "turtles_windows_process_is_exited"
+extern "C" fn windows_process_is_exited(process : WindowsProcess) -> Int32 = "turtles_windows_process_is_exited"
 
 ///|
 #cfg(platform="windows")
-extern "C" fn windows_process_exit_code(process : WindowsProcess) -> Int = "turtles_windows_process_exit_code"
+extern "C" fn windows_process_exit_code(process : WindowsProcess) -> Int32 = "turtles_windows_process_exit_code"
 
 ///|
 #cfg(platform="windows")
-extern "C" fn windows_job_active_processes(process : WindowsProcess) -> Int = "turtles_windows_job_active_processes"
+extern "C" fn windows_job_active_processes(process : WindowsProcess) -> Int32 = "turtles_windows_job_active_processes"
 
 ///|
 #cfg(platform="windows")
-extern "C" fn windows_job_terminate(process : WindowsProcess) -> Int = "turtles_windows_job_terminate"
+extern "C" fn windows_job_terminate(process : WindowsProcess) -> Int32 = "turtles_windows_job_terminate"
 
 ///|
 #cfg(platform="windows")
-extern "C" fn windows_job_members_exited(process : WindowsProcess) -> Int = "turtles_windows_job_members_exited"
+extern "C" fn windows_job_members_exited(process : WindowsProcess) -> Int32 = "turtles_windows_job_members_exited"
 
 ///|
 #cfg(platform="windows")
-extern "C" fn windows_process_close(process : WindowsProcess) -> Int = "turtles_windows_process_close"
+extern "C" fn windows_process_close(process : WindowsProcess) -> Int32 = "turtles_windows_process_close"
 
 ///|
 #cfg(platform="windows")
-extern "C" fn windows_process_last_error() -> Int = "turtles_windows_process_last_error"
+extern "C" fn windows_process_last_error() -> Int32 = "turtles_windows_process_last_error"
 
 ///|
 #cfg(platform="windows")
@@ -288,7 +288,7 @@ fn StringBuilder::write_windows_escaped_arg(
   let mut segment_start = 0
   let mut index = 0
   let mut trailing_backslash = 0
-  fn flush(skip : Int) {
+  fn flush(skip : Int32) {
     if index > segment_start {
       builder.write_stringview(arg[segment_start:index - trailing_backslash])
       if trailing_backslash > 0 {
@@ -329,8 +329,8 @@ fn windows_moon_command_line(args : Array[String]) -> String {
 
 ///|
 #cfg(platform="windows")
-async fn windows_wait_for_process_tree(process : WindowsProcess) -> Int {
-  let mut exit_code : Int? = None
+async fn windows_wait_for_process_tree(process : WindowsProcess) -> Int32 {
+  let mut exit_code : Int32? = None
   while true {
     if exit_code is None {
       let is_exited = windows_process_is_exited(process)
@@ -360,7 +360,7 @@ async fn windows_wait_for_process_tree(process : WindowsProcess) -> Int {
 
 ///|
 #cfg(platform="windows")
-async fn windows_wait_for_empty_job(process : WindowsProcess) -> Int {
+async fn windows_wait_for_empty_job(process : WindowsProcess) -> Int32 {
   // Wait on retained handles for every verified job member. Job accounting
   // can reach zero before Windows signals the corresponding process handles.
   // Keep a finite poll budget so cleanup still reaches its close/error path.
@@ -417,9 +417,9 @@ async fn windows_cleanup_process(process : WindowsProcess) -> Unit {
 async fn run_moon_command(
   root : String,
   args : Array[String],
-  timeout_ms : Int,
+  timeout_ms : Int32,
   _timeout_command : String?,
-  target? : String? = None,
+  target~ : String? = None,
 ) -> CommandResult {
   let command_args = moon_args(args, target)
   let process = windows_spawn_scoped_process(
@@ -470,11 +470,11 @@ async fn run_moon_command(
 async fn classify_mutant(
   root : String,
   mutation : Mutation,
-  check_timeout_ms : Int,
-  test_timeout_ms : Int,
+  check_timeout_ms : Int32,
+  test_timeout_ms : Int32,
   plan : TestPlan?,
   timeout_command : String?,
-  target? : String? = None,
+  target~ : String? = None,
 ) -> (Outcome, Array[String]?, Array[Kill]?) {
   match
     run_moon_command(
@@ -510,9 +510,9 @@ async fn classify_mutant(
 async fn validate_workspace(
   workspace : String,
   reference : String,
-  timeout_ms : Int,
+  timeout_ms : Int32,
   timeout_command : String?,
-  target? : String? = None,
+  target~ : String? = None,
 ) -> (Int64, Int64) {
   let check_started = @async.now()
   match
@@ -547,9 +547,9 @@ async fn validate_workspace(
 async fn baseline_test_run(
   workspace : String,
   reference : String,
-  timeout_ms : Int,
+  timeout_ms : Int32,
   timeout_command : String?,
-  target? : String? = None,
+  target~ : String? = None,
 ) -> Int64 {
   let test_args = mutant_test_args(None)
   let manifest = snapshot_workspace(workspace)
@@ -649,11 +649,11 @@ fn abort_unstable_baseline(
 /// hub package that recompile can exceed the entire warm test baseline
 /// (observed: moonbitlang/core `internal/strconv` checks >10s).
 fn effective_timeouts(
-  timeout_ms : Int,
+  timeout_ms : Int32,
   timeout_multiplier : Double?,
   baseline_check_ms : Int64,
   baseline_test_ms : Int64,
-) -> (Int, Int) {
+) -> (Int32, Int32) {
   match timeout_multiplier {
     None => (timeout_ms, timeout_ms)
     Some(multiplier) => {
@@ -755,7 +755,7 @@ async fn run_mutation_pool(
   temp : String,
   reference : String,
   mutations : Array[Mutation],
-  jobs : Int,
+  jobs : Int32,
   reuse : Array[MutationResult?],
   classify : async (String, Mutation) -> (Outcome, Array[String]?, Array[Kill]?),
 ) -> Array[MutationResult] {
@@ -823,16 +823,16 @@ async fn run_mutation_pool(
 async fn run_mutations(
   root : String,
   mutations : Array[Mutation],
-  timeout_ms : Int,
+  timeout_ms : Int32,
   timeout_multiplier : Double?,
-  jobs : Int,
+  jobs : Int32,
   affected : Bool,
   reuse : Array[MutationResult?],
-  target? : String? = None,
-  emit_properties? : Bool = false,
-  pbt_witness? : Bool = false,
-  pbt_amplify? : Int? = None,
-  output_dir? : String = "",
+  target~ : String? = None,
+  emit_properties~ : Bool = false,
+  pbt_witness~ : Bool = false,
+  pbt_amplify~ : Int32? = None,
+  output_dir~ : String = "",
 ) -> (
   Int64,
   Int64,

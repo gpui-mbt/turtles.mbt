@@ -1,8 +1,8 @@
 ///|
 fn mk_mutation(
   path : String,
-  start : Int,
-  end : Int,
+  start : Int32,
+  end : Int32,
   original : String,
   replacement : String,
 ) -> Mutation {
@@ -21,7 +21,7 @@ fn mk_mutation(
 
 ///|
 fn mk_prior(
-  schema : Int,
+  schema : Int32,
   turtles : String?,
   moon : String?,
   file_hash : String,
