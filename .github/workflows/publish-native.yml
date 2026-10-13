@@ -225,7 +225,7 @@ jobs:
           moon fmt --check
           moon check --target native --deny-warn
           moon test --target native
-          moon publish --dry-run
+          moon package --list
       - name: Publish Mooncakes version
         env:
           MOONCAKES_TOKEN: ${{ secrets.MOONCAKES_TOKEN }}

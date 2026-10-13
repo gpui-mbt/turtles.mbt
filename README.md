@@ -303,3 +303,9 @@ publishing stops and preserves it for manual repair. If tag lookup and the
 paginated release list disagree, publishing also stops for manual review.
 
 Update `cmd/turtles/config.mbt`'s `turtles_version` alongside `moon.mod`.
+
+After native publication succeeds, the workflow validates and publishes the
+same version to Mooncakes, then installs it from an unrelated directory with
+Python commands blocked and runs a mutation fixture. Configure repository
+secret `MOONCAKES_TOKEN` with a publish token or the JSON contents of
+`~/.moon/credentials.json`; the workflow fails explicitly if it is missing.
