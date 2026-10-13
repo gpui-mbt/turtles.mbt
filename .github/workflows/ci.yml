@@ -35,6 +35,8 @@ jobs:
         run: moon check --target native --deny-warn
       - name: Unit tests
         run: moon test --target native
+      - name: Standalone MoonBit E2E report validator tests
+        run: moon test scripts/self_report.mbtx
       - name: Offline verification-profile adversarial tests
         run: python3 -m unittest discover -s scripts/tests -v
       - name: Run fixture baseline
@@ -437,3 +439,51 @@ jobs:
         run: python -m unittest discover -s scripts/tests -p 'test_windows_smoke.py' -v
       - name: Run native fixtures, parallel workers, and target filtering
         run: python scripts/windows_smoke.py
+
+  published-cli-no-checkout:
+    runs-on: ubuntu-latest
+    steps:
+      # Never check out this repository: the published package must be usable
+      # from an unrelated MoonBit module without its Python dev scripts.
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Install pinned Mooncakes CLI
+        run: moon install f4ah6o/turtles/cmd/turtles@0.4.6
+      - name: Run standalone consumer fixture with Python blocked
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e .git
+          test ! -e moon.mod
+          temp="$(mktemp -d)"
+          trap 'rm -rf "$temp"' EXIT
+          mkdir -p "$temp/module" "$temp/no-python"
+          cat > "$temp/module/moon.mod" <<'MOD'
+          name = "smoke/clone_free"
+          version = "0.1.0"
+          preferred_target = "native"
+          MOD
+          touch "$temp/module/moon.pkg"
+          cat > "$temp/module/plus.mbt" <<'MBT'
+          ///|
+          pub fn plus(a : Int, b : Int) -> Int {
+            a + b
+          }
+          MBT
+          cat > "$temp/module/plus_test.mbt" <<'MBT'
+          ///|
+          test "plus" {
+            inspect(plus(1, 2), content="3")
+          }
+          MBT
+          for exe in python python3; do
+            printf '%s\n' '#!/bin/sh' 'echo "unexpected Python invocation" >&2' 'exit 97' > "$temp/no-python/$exe"
+            chmod +x "$temp/no-python/$exe"
+          done
+          PATH="$temp/no-python:$PATH" turtles --dir "$temp/module" --timeout 60 \
+            --json "$temp/report.json"
+          jq -e '.schema == 3 and (.mutants | length) == 1 and
+            .summary.killed == 1 and .summary.survived == 0 and
+            .summary.timeout == 0 and .summary.unviable == 0' "$temp/report.json"

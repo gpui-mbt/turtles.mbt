@@ -1,0 +1,64 @@
+///|
+import {
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/async@0.22.4",
+  "moonbitlang/async@0.22.4/fs",
+}
+
+///|
+fn valid_fixture_report(report : Json) -> Bool {
+  match report {
+    {
+      "schema": Number(schema),
+      "mutants": Array(mutants),
+      "summary": {
+        "killed": Number(killed),
+        "survived": Number(survived),
+        "timeout": Number(timeout),
+        "unviable": Number(unviable),
+        ..
+      },
+      ..
+    } =>
+      schema == 3.0 && mutants.length() == 6 && killed == 6.0 &&
+      survived == 0.0 && timeout == 0.0 && unviable == 0.0
+    _ => false
+  }
+}
+
+///|
+test "validates a complete six-kill fixture report" {
+  let good = @json.parse(
+    "{\"schema\":3,\"mutants\":[{},{},{},{},{},{}],\"summary\":{\"killed\":6,\"survived\":0,\"timeout\":0,\"unviable\":0}}",
+  )
+  assert_true(valid_fixture_report(good))
+}
+
+///|
+test "rejects missing, surviving, and incomplete mutants" {
+  let wrong_count = @json.parse(
+    "{\"schema\":3,\"mutants\":[],\"summary\":{\"killed\":6,\"survived\":0,\"timeout\":0,\"unviable\":0}}",
+  )
+  assert_true(!valid_fixture_report(wrong_count))
+  let survivor = @json.parse(
+    "{\"schema\":3,\"mutants\":[{},{},{},{},{},{}],\"summary\":{\"killed\":5,\"survived\":1,\"timeout\":0,\"unviable\":0}}",
+  )
+  assert_true(!valid_fixture_report(survivor))
+  let missing_outcome = @json.parse(
+    "{\"schema\":3,\"mutants\":[{},{},{},{},{},{}],\"summary\":{\"killed\":6,\"survived\":0,\"timeout\":0}}",
+  )
+  assert_true(!valid_fixture_report(missing_outcome))
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() == 2 else {
+    fail("usage: moon run scripts/self_report.mbtx -- <report.json>")
+  }
+  let contents = @fs.read_file(args[1]).text()
+  guard valid_fixture_report(@json.parse(contents)) else {
+    fail("unexpected turtles fixture report at {args[1]}")
+  }
+}

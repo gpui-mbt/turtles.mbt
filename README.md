@@ -12,11 +12,13 @@ The supported way to install `turtles` is `moon install`, which builds the nativ
 
 ### Stable — Mooncakes
 
-The registry package is the default install path. The 0.4.6 package's pinned install command is:
+The registry package is the default install path. **No turtles repository clone and no Python interpreter are required** to install or run the CLI; `moon install` fetches the published Mooncakes module and builds the native executable. The MoonBit toolchain remains required at runtime because turtles invokes `moon check` and `moon test` for the project under test. The 0.4.6 package's pinned install command is:
 
 ```sh
 moon install f4ah6o/turtles/cmd/turtles@0.4.6
 ```
+
+The installed `turtles` executable does not run any of the repository's `scripts/*.py` files. Those scripts are for contributor CI, release verification, platform regressions, and an optional experimental proof companion, not for mutation testing users. `.mbtx` is useful for standalone MoonBit automation (including our self-E2E validator), but it is not needed to launch this native CLI. `moonx` runs published Wasm executables; `cmd/turtles` currently supports native only and uses native process-control stubs, so use `moon install` or the native release asset rather than `moonx`.
 
 ### Development — GitHub
 

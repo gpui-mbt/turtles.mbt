@@ -57,9 +57,12 @@ hiding production files to reach green:
 ## Binary e2e
 
 `scripts/self_e2e.sh` runs `moon run cmd/turtles` against `fixtures/basic`
-and validates the JSON report (schema, six fixture mutants, zero
-survivors/timeouts/unviables). It catches defects unit tests miss — a binary
-that exits successfully but produces a wrong report fails the assertions.
+and validates the JSON report with `scripts/self_report.mbtx` (schema, six
+fixture mutants, zero survivors/timeouts/unviables). It catches defects unit
+tests miss — a binary that exits successfully but produces a wrong report
+fails the assertions. This E2E uses only MoonBit and POSIX shell, not Python.
+Run `moon test scripts/self_report.mbtx` to test the standalone MoonBit report
+validator independently.
 
 The script runs the fixture sweep twice with different `--json` targets so
 both `mkdir` flag mutants in report writing stay reachable: the first report
