@@ -68,10 +68,14 @@ The checkout-free consumer matrix tests published 0.4.7 through both Mooncakes
 and native assets on Linux, macOS Apple Silicon, and Windows. Each consumer
 fixture starts without a build cache, with Python commands blocked. The
 Windows runner opts out of optional Visual Studio telemetry through the
-[documented SQM policy](https://learn.microsoft.com/en-us/visualstudio/ide/visual-studio-experience-improvement-program#registry-settings).
-Compiler telemetry helpers can otherwise remain in a scoped process job;
-pre-building the fixture would hide that cold-build behavior. The CLI's
-process-tree timeout and cleanup checks remain enabled.
+[documented SQM settings](https://learn.microsoft.com/en-us/visualstudio/ide/visual-studio-experience-improvement-program#registry-settings),
+including the policy and version-specific registry keys. The installed
+toolchain version is resolved with `vswhere`.
+This CI setting investigates the initial Windows native-asset baseline
+timeout: the registry route passed and left a `vctip` helper at job cleanup,
+but their causal relationship is not established. The fixture is not
+pre-built, and the CLI's process-tree timeout and cleanup checks remain
+enabled.
 
 The script runs the fixture sweep twice with different `--json` targets so
 both `mkdir` flag mutants in report writing stay reachable: the first report

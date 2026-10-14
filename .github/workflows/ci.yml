@@ -494,11 +494,24 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $policy = 'HKLM:\Software\Policies\Microsoft\VisualStudio\SQM'
-          New-Item -Path $policy -Force | Out-Null
-          New-ItemProperty -Path $policy -Name OptIn -PropertyType DWord -Value 0 -Force | Out-Null
-          if ((Get-ItemProperty -Path $policy -Name OptIn).OptIn -ne 0) {
-            throw 'Visual Studio telemetry opt-out policy was not applied'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $version = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion
+          if ($LASTEXITCODE -ne 0 -or -not $version) {
+            throw 'Could not resolve the installed Visual Studio toolchain version'
+          }
+          $major = ([Version]$version.Trim()).Major
+          $keys = @(
+            'HKLM:\Software\Policies\Microsoft\VisualStudio\SQM',
+            'HKLM:\SOFTWARE\Wow6432Node\Microsoft\VSCommon\17.0\SQM',
+            "HKLM:\SOFTWARE\Wow6432Node\Microsoft\VSCommon\$major.0\SQM"
+          ) | Select-Object -Unique
+          foreach ($key in $keys) {
+            New-Item -Path $key -Force | Out-Null
+            New-ItemProperty -Path $key -Name OptIn -PropertyType DWord -Value 0 -Force | Out-Null
+            if ((Get-ItemProperty -Path $key -Name OptIn).OptIn -ne 0) {
+              throw "Visual Studio telemetry opt-out was not applied at $key"
+            }
+            Write-Host "Applied Visual Studio telemetry opt-out at $key"
           }
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
