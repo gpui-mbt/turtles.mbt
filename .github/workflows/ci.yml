@@ -605,6 +605,10 @@ jobs:
             $processes | Where-Object { $ownedIds.Contains([uint32]$_.ProcessId) } |
               Select-Object ProcessId, ParentProcessId, Name, ExecutablePath |
               Format-Table -AutoSize | Out-String | Write-Host
+            Write-Host 'Toolchain candidates with unconfirmed ownership (parents may have exited):'
+            $processes | Where-Object { $_.Name -match '^(moon|moonc|cl|link|vctip|mspdbsrv)\.exe$' } |
+              Select-Object ProcessId, ParentProcessId, Name, ExecutablePath |
+              Format-Table -AutoSize | Out-String | Write-Host
             Get-ChildItem -Path $Runtime -Recurse -Filter '*moon-output.log' |
               ForEach-Object { Write-Host $_.FullName; Get-Content $_.FullName -Tail 80 }
             $consumerProcess.Kill($true)
