@@ -12,11 +12,15 @@ The supported way to install `turtles` is `moon install`, which builds the nativ
 
 ### Stable — Mooncakes
 
-The registry package is the default install path. The 0.4.7 package's pinned install command is:
+The registry package is the default install path. **No turtles repository clone and no Python interpreter are required** to install or run the CLI; `moon install` fetches the published Mooncakes module and builds the native executable. The MoonBit toolchain remains required at runtime because turtles invokes `moon check` and `moon test` for the project under test. The published 0.4.7 package's pinned install command is:
 
 ```sh
 moon install f4ah6o/turtles/cmd/turtles@0.4.7
 ```
+
+The installed `turtles` executable does not run any of the repository's `scripts/*.py` files. Those scripts are for contributor CI, release verification, platform regressions, and an optional experimental proof companion, not for mutation testing users. `.mbtx` is useful for standalone MoonBit automation (including our self-E2E validator), but it is not needed to launch this native CLI. `moonx` runs published Wasm executables; `cmd/turtles` currently supports native only and uses native process-control stubs, so use `moon install` or the native release asset rather than `moonx`.
+
+Version 0.4.7 fixes the MoonBit 0.1.20261012 compatibility and obsolete dependency-manifest errors affecting 0.4.6, and pins `prettyprinter@0.4.11`. Both the Mooncakes package and [v0.4.7 native release assets](https://github.com/gpui-mbt/turtles.mbt/releases/tag/v0.4.7) are published. CI independently tests registry installation and checksum-verified native assets on Linux x86_64, macOS Apple Silicon, and Windows x86_64, from unrelated modules with Python commands blocked and without checking out turtles. Windows source-package installation also requires an MSVC build environment. Windows native-asset CI currently disables the optional MSVC `vctip.exe` helper in its disposable runner: a fresh, unmodified toolchain can leave the 0.4.7 CLI waiting after baseline tests pass. Prefer the Mooncakes install route; the remaining cold-start limitation is tracked in [this follow-up](issues/open/20261014-windows-cold-native-compiler-helper.md).
 
 ### Development — GitHub
 

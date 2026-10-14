@@ -57,9 +57,27 @@ hiding production files to reach green:
 ## Binary e2e
 
 `scripts/self_e2e.sh` runs `moon run cmd/turtles` against `fixtures/basic`
-and validates the JSON report (schema, six fixture mutants, zero
-survivors/timeouts/unviables). It catches defects unit tests miss — a binary
-that exits successfully but produces a wrong report fails the assertions.
+and validates the JSON report with `scripts/self_report.mbtx` (schema, six
+fixture mutants, zero survivors/timeouts/unviables). It catches defects unit
+tests miss — a binary that exits successfully but produces a wrong report
+fails the assertions. This E2E uses only MoonBit and POSIX shell, not Python.
+Run `moon test scripts/self_report.mbtx` to test the standalone MoonBit report
+validator independently.
+
+The checkout-free consumer matrix tests published 0.4.7 through both Mooncakes
+and native assets on Linux, macOS Apple Silicon, and Windows. Each consumer
+fixture starts without a build cache, with Python commands blocked. The
+Windows consumer runners temporarily rename the optional MSVC `vctip.exe`
+helper in the compiler directory of that disposable VM. The compiler and
+linker remain available. This is an explicit CI environment workaround, not
+an assertion that unmodified cold Windows environments work: 0.4.7's native
+asset timed out after a passing baseline while `vctip.exe` remained alive.
+SQM opt-out settings did not prevent the helper from running, so those
+ineffective CI settings were removed. The fixture is not pre-built and the
+CLI's process-tree timeout and cleanup checks remain enabled. The Windows
+wrapper reports process candidates and nested Moon output on a bounded
+outer deadline; it only stops the CLI process it started and its descendants.
+See [the cold-Windows follow-up](../issues/open/20261014-windows-cold-native-compiler-helper.md).
 
 The script runs the fixture sweep twice with different `--json` targets so
 both `mkdir` flag mutants in report writing stay reachable: the first report
