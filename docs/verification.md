@@ -64,6 +64,15 @@ fails the assertions. This E2E uses only MoonBit and POSIX shell, not Python.
 Run `moon test scripts/self_report.mbtx` to test the standalone MoonBit report
 validator independently.
 
+The checkout-free consumer matrix tests published 0.4.7 through both Mooncakes
+and native assets on Linux, macOS Apple Silicon, and Windows. Each consumer
+fixture starts without a build cache, with Python commands blocked. The
+Windows runner opts out of optional Visual Studio telemetry through the
+[documented SQM policy](https://learn.microsoft.com/en-us/visualstudio/ide/visual-studio-experience-improvement-program#registry-settings).
+Compiler telemetry helpers can otherwise remain in a scoped process job;
+pre-building the fixture would hide that cold-build behavior. The CLI's
+process-tree timeout and cleanup checks remain enabled.
+
 The script runs the fixture sweep twice with different `--json` targets so
 both `mkdir` flag mutants in report writing stay reachable: the first report
 lands in an existing directory (a dropped `allow_exist=true` fails), the

@@ -490,6 +490,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       # A checkout would hide accidental dependencies on contributor scripts.
+      - name: Opt out of optional MSVC telemetry in the disposable runner
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $policy = 'HKLM:\Software\Policies\Microsoft\VisualStudio\SQM'
+          New-Item -Path $policy -Force | Out-Null
+          New-ItemProperty -Path $policy -Name OptIn -PropertyType DWord -Value 0 -Force | Out-Null
+          if ((Get-ItemProperty -Path $policy -Name OptIn).OptIn -ne 0) {
+            throw 'Visual Studio telemetry opt-out policy was not applied'
+          }
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
       - uses: hustcer/setup-moonbit@v1
@@ -515,8 +525,10 @@ jobs:
           done
           export PATH="$temp/no-python:$PATH"
           cd "$temp/module"
+          moon version --all
           moon update
           asset="$temp/bin/${{ matrix.executable }}"
+          echo "Installing $TURTLES_RELEASE_VERSION via ${{ matrix.install }}"
           if [[ "${{ matrix.install }}" == "registry" ]]; then
             moon install "f4ah6o/turtles/cmd/turtles@$TURTLES_RELEASE_VERSION" --bin "$temp/bin"
           else
@@ -548,6 +560,7 @@ jobs:
             inspect(plus(1, 2), content="3")
           }
           MBT
+          echo "Running published CLI against the cold consumer fixture"
           "$asset" --dir . --timeout 60 --json "$temp/report.json"
           jq -e --arg v "$TURTLES_RELEASE_VERSION" '.schema == 3 and .turtles_version == $v and (.mutants | length) == 1 and
             .mutants[0].outcome == "KILLED" and .summary.killed == 1 and .summary.survived == 0 and
