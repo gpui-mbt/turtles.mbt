@@ -67,16 +67,17 @@ validator independently.
 The checkout-free consumer matrix tests published 0.4.7 through both Mooncakes
 and native assets on Linux, macOS Apple Silicon, and Windows. Each consumer
 fixture starts without a build cache, with Python commands blocked. The
-Windows runner opts out of optional Visual Studio telemetry through the
-[documented policy and `VSCommon\17.0` SQM settings](https://learn.microsoft.com/en-us/visualstudio/ide/visual-studio-experience-improvement-program#registry-settings).
-The same registry layout is also applied to the installed toolchain's major
-version, resolved with `vswhere`; that additional key is a diagnostic
-extrapolation whose effect is not assumed.
-This CI setting investigates the initial Windows native-asset baseline
-timeout: the registry route passed and left a `vctip` helper at job cleanup,
-but their causal relationship is not established. The fixture is not
-pre-built, and the CLI's process-tree timeout and cleanup checks remain
-enabled.
+Windows consumer runners temporarily rename the optional MSVC `vctip.exe`
+helper in the compiler directory of that disposable VM. The compiler and
+linker remain available. This is an explicit CI environment workaround, not
+an assertion that unmodified cold Windows environments work: 0.4.7's native
+asset timed out after a passing baseline while `vctip.exe` remained alive.
+SQM opt-out settings did not prevent the helper from running, so those
+ineffective CI settings were removed. The fixture is not pre-built and the
+CLI's process-tree timeout and cleanup checks remain enabled. The Windows
+wrapper reports process candidates and nested Moon output on a bounded
+outer deadline; it only stops the CLI process it started and its descendants.
+See [the cold-Windows follow-up](../issues/open/20261014-windows-cold-native-compiler-helper.md).
 
 The script runs the fixture sweep twice with different `--json` targets so
 both `mkdir` flag mutants in report writing stay reachable: the first report
