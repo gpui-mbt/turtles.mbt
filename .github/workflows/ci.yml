@@ -574,7 +574,51 @@ jobs:
           }
           MBT
           echo "Running published CLI against the cold consumer fixture"
-          "$asset" --dir . --timeout 60 --json "$temp/report.json"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cat > "$temp/consumer.ps1" <<'PS1'
+          param([string]$Cli, [string]$Module, [string]$Report, [string]$Runtime)
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path $Runtime -Force | Out-Null
+          $env:TMP = $Runtime
+          $env:TEMP = $Runtime
+          $env:TMPDIR = $Runtime
+          $start = [System.Diagnostics.ProcessStartInfo]::new()
+          $start.FileName = $Cli
+          $start.WorkingDirectory = $Module
+          $start.UseShellExecute = $false
+          foreach ($argument in @('--dir', '.', '--timeout', '60', '--json', $Report)) {
+            $start.ArgumentList.Add($argument)
+          }
+          $consumerProcess = [System.Diagnostics.Process]::Start($start)
+          if (-not $consumerProcess.WaitForExit(120000)) {
+            $processes = @(Get-CimInstance Win32_Process)
+            $ownedIds = [System.Collections.Generic.HashSet[uint32]]::new()
+            $null = $ownedIds.Add([uint32]$consumerProcess.Id)
+            do {
+              $added = $false
+              foreach ($candidate in $processes) {
+                if ($ownedIds.Contains([uint32]$candidate.ParentProcessId)) {
+                  if ($ownedIds.Add([uint32]$candidate.ProcessId)) { $added = $true }
+                }
+              }
+            } while ($added)
+            $processes | Where-Object { $ownedIds.Contains([uint32]$_.ProcessId) } |
+              Select-Object ProcessId, ParentProcessId, Name, ExecutablePath |
+              Format-Table -AutoSize | Out-String | Write-Host
+            Get-ChildItem -Path $Runtime -Recurse -Filter '*moon-output.log' |
+              ForEach-Object { Write-Host $_.FullName; Get-Content $_.FullName -Tail 80 }
+            $consumerProcess.Kill($true)
+            $null = $consumerProcess.WaitForExit(10000)
+            throw 'Cold consumer fixture exceeded the 120-second CI diagnostic deadline'
+          }
+          exit $consumerProcess.ExitCode
+          PS1
+            pwsh -NoProfile -File "$(cygpath -w "$temp/consumer.ps1")" \
+              -Cli "$(cygpath -w "$asset")" -Module "$(cygpath -w "$temp/module")" \
+              -Report "$(cygpath -w "$temp/report.json")" -Runtime "$(cygpath -w "$temp/runtime")"
+          else
+            "$asset" --dir . --timeout 60 --json "$temp/report.json"
+          fi
           jq -e --arg v "$TURTLES_RELEASE_VERSION" '.schema == 3 and .turtles_version == $v and (.mutants | length) == 1 and
             .mutants[0].outcome == "KILLED" and .summary.killed == 1 and .summary.survived == 0 and
             .summary.timeout == 0 and .summary.unviable == 0' "$temp/report.json"
