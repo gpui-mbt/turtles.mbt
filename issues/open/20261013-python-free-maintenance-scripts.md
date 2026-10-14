@@ -8,7 +8,10 @@
 
 The released CLI is already a native MoonBit executable. Its dependencies do not
 include Python and it does not need a turtles source checkout.
-`moon install f4ah6o/turtles/cmd/turtles@0.4.6` provides the supported consumer UX.
+`moon install f4ah6o/turtles/cmd/turtles@0.4.7` provides the supported consumer UX.
+Version 0.4.7 is published on Mooncakes and fixes the obsolete dependency
+manifest in 0.4.6. CI covers both registry installation and native release
+assets on Linux, macOS Apple Silicon, and Windows without a turtles checkout.
 
 The remaining Python files are **not** runtime dependencies. Removing them can
 reduce contributor-toolchain diversity, but rewriting them is **not** required

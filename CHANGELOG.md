@@ -16,6 +16,13 @@
 
 ### Migration
 
+## 0.4.7
+
+### Fixed
+
+- Resolve `prettyprinter@0.4.11` so Mooncakes CLI installation works with Moon 0.1.20261012, which rejects legacy `moon.mod.json` dependencies.
+- Update source formatting and the prior-report test's JSON conversion for the current MoonBit toolchain and warning-free native checks.
+
 ## 0.4.6
 
 ### Fixed

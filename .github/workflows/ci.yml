@@ -448,51 +448,56 @@ jobs:
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
       - name: Update MoonBit registry
         run: moon update
-      # Source checkout still resolves prettyprinter@0.4.10 without PR #42.
-      # Apply the exact pending manifest fix only in this disposable CI job
-      # to test the .mbtx integration without modifying the contributor branch.
-      - name: Temporary compatible source dependency for E2E
-        run: moon add moonbit-community/prettyprinter@0.4.11
+      - name: Check standalone MoonBit validator formatting
+        run: moon fmt scripts/self_report.mbtx --check
       - name: Test standalone MoonBit validator
         run: moon test scripts/self_report.mbtx
       - name: Run Python-free binary self-E2E
-        run: sh scripts/self_e2e.sh
-
-  published-cli-no-checkout:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            platform: linux-x86_64
-            sha256: 232d184f4569728d74e4dbcbb3bd6fec92f05ebb5f82ab8b95dab8221cd0854c
-          - os: macos-15
-            platform: darwin-aarch64
-            sha256: 341f81f9bbd0db153627f8740940d48ad5d24ea54af5dc1c03fe8cd5528753da
-    runs-on: ${{ matrix.os }}
-    steps:
-      # Never check out this repository: the published package must be usable
-      # from an unrelated MoonBit module without its Python dev scripts.
-      - name: Install MoonBit
-        run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
-          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
-      # The Mooncakes 0.4.6 source package currently fails to resolve the
-      # legacy prettyprinter@0.4.10 manifest under moon 0.1.20261012.
-      # Check the published native asset independently of that known blocker.
-      - name: Download checksum-verified native release CLI
         shell: bash
         run: |
           set -euo pipefail
-          asset="$HOME/.moon/bin/turtles"
-          curl -fsSL "https://github.com/gpui-mbt/turtles.mbt/releases/download/v0.4.6/turtles-${{ matrix.platform }}" -o "$asset"
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            echo "${{ matrix.sha256 }}  $asset" | shasum -a 256 -c -
-          else
-            echo "${{ matrix.sha256 }}  $asset" | sha256sum -c -
-          fi
-          chmod +x "$asset"
-      - name: Run standalone consumer fixture with Python blocked
+          blocked="$(mktemp -d)"
+          trap 'rm -rf "$blocked"' EXIT
+          for exe in python python3 py; do
+            printf '%s\n' '#!/bin/sh' ': > "$(dirname "$0")/invoked"' 'echo "unexpected Python invocation" >&2' 'exit 97' > "$blocked/$exe"
+            chmod +x "$blocked/$exe"
+          done
+          PATH="$blocked:$PATH" sh scripts/self_e2e.sh
+          test ! -e "$blocked/invoked"
+
+  published-cli-no-checkout:
+    timeout-minutes: 20
+    env:
+      TURTLES_RELEASE_VERSION: 0.4.7
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+        install: [registry, native-asset]
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x86_64
+            executable: turtles
+            sha256: 5b8e342a3362e2239d261615733a0267081accdf5c838466cd390a5ec8c8c411
+          - os: macos-15
+            platform: darwin-aarch64
+            executable: turtles
+            sha256: 4bcb1140e889cf11e87dd4eae484951e754d8f58ba4cc442cdc2ba7f20b4d685
+          - os: windows-2025
+            platform: windows-x86_64.exe
+            executable: turtles.exe
+            sha256: 31032520584df4fb5fa720f233d135609b8d4b3c8394936fa27b794f428d38ca
+    runs-on: ${{ matrix.os }}
+    steps:
+      # A checkout would hide accidental dependencies on contributor scripts.
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - uses: hustcer/setup-moonbit@v1
+      - name: Verify Apple Silicon runner
+        if: runner.os == 'macOS'
+        shell: bash
+        run: test "$(uname -m)" = arm64
+      - name: Install and run standalone consumer fixture with Python blocked
         shell: bash
         run: |
           set -euo pipefail
@@ -500,31 +505,51 @@ jobs:
           test ! -e moon.mod
           temp="$(mktemp -d)"
           trap 'rm -rf "$temp"' EXIT
-          mkdir -p "$temp/module" "$temp/no-python"
-          cat > "$temp/module/moon.mod" <<'MOD'
+          mkdir -p "$temp/module" "$temp/no-python" "$temp/bin"
+          for exe in python python3 py; do
+            printf '%s\n' '#!/bin/sh' ': > "$(dirname "$0")/invoked"' 'echo "unexpected Python invocation" >&2' 'exit 97' > "$temp/no-python/$exe"
+            chmod +x "$temp/no-python/$exe"
+            if [[ "$RUNNER_OS" == "Windows" ]]; then
+              printf '%s\r\n' '@echo off' 'echo invoked>"%~dp0invoked"' 'echo unexpected Python invocation 1>&2' 'exit /b 97' > "$temp/no-python/$exe.cmd"
+            fi
+          done
+          export PATH="$temp/no-python:$PATH"
+          cd "$temp/module"
+          moon update
+          asset="$temp/bin/${{ matrix.executable }}"
+          if [[ "${{ matrix.install }}" == "registry" ]]; then
+            moon install "f4ah6o/turtles/cmd/turtles@$TURTLES_RELEASE_VERSION" --bin "$temp/bin"
+          else
+            curl -fsSL "https://github.com/gpui-mbt/turtles.mbt/releases/download/v$TURTLES_RELEASE_VERSION/turtles-${{ matrix.platform }}" -o "$asset"
+            if [[ "$RUNNER_OS" == "macOS" ]]; then
+              echo "${{ matrix.sha256 }}  $asset" | shasum -a 256 -c -
+            else
+              echo "${{ matrix.sha256 }}  $asset" | sha256sum -c -
+            fi
+            chmod +x "$asset"
+          fi
+          test "$("$asset" --version)" = "turtles $TURTLES_RELEASE_VERSION"
+          "$asset" --help
+          cat > moon.mod <<'MOD'
           name = "smoke/clone_free"
           version = "0.1.0"
           preferred_target = "native"
           MOD
-          touch "$temp/module/moon.pkg"
-          cat > "$temp/module/plus.mbt" <<'MBT'
+          touch moon.pkg
+          cat > plus.mbt <<'MBT'
           ///|
-          pub fn plus(a : Int, b : Int) -> Int {
+          pub fn plus(a : Int32, b : Int32) -> Int32 {
             a + b
           }
           MBT
-          cat > "$temp/module/plus_test.mbt" <<'MBT'
+          cat > plus_test.mbt <<'MBT'
           ///|
           test "plus" {
             inspect(plus(1, 2), content="3")
           }
           MBT
-          for exe in python python3; do
-            printf '%s\n' '#!/bin/sh' 'echo "unexpected Python invocation" >&2' 'exit 97' > "$temp/no-python/$exe"
-            chmod +x "$temp/no-python/$exe"
-          done
-          PATH="$temp/no-python:$PATH" turtles --dir "$temp/module" --timeout 60 \
-            --json "$temp/report.json"
-          jq -e '.schema == 3 and (.mutants | length) == 1 and
-            .summary.killed == 1 and .summary.survived == 0 and
+          "$asset" --dir . --timeout 60 --json "$temp/report.json"
+          jq -e --arg v "$TURTLES_RELEASE_VERSION" '.schema == 3 and .turtles_version == $v and (.mutants | length) == 1 and
+            .mutants[0].outcome == "KILLED" and .summary.killed == 1 and .summary.survived == 0 and
             .summary.timeout == 0 and .summary.unviable == 0' "$temp/report.json"
+          test ! -e "$temp/no-python/invoked"

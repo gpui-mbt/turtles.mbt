@@ -30,7 +30,7 @@ fn witness_helper_candidates(entry : FnInfo, mutid : String) -> Array[String] {
 fn witness_test_names(
   entry : FnInfo,
   mutid : String,
-  suffix : Int,
+  suffix : Int32,
 ) -> Array[String] {
   let base = "turtles witness \{mutid} \{entry.name}"
   let guard_name = "\{base} guard\{suffix_tag(suffix)}"
@@ -39,7 +39,7 @@ fn witness_test_names(
 }
 
 ///|
-fn suffix_tag(suffix : Int) -> String {
+fn suffix_tag(suffix : Int32) -> String {
   if suffix == 0 {
     ""
   } else {
@@ -239,9 +239,9 @@ async fn run_pbt_witness(
   reference : String,
   results : Array[MutationResult],
   index : ModuleIndex,
-  test_timeout_ms : Int,
+  test_timeout_ms : Int32,
   timeout_command : String?,
-  target? : String? = None,
+  target~ : String? = None,
 ) -> Unit {
   let manifest = Ref(snapshot_workspace(workspace))
   for i, result in results {
@@ -298,7 +298,7 @@ async fn witness_one(
   helper : String,
   guard_name : String,
   witness_name : String,
-  test_timeout_ms : Int,
+  test_timeout_ms : Int32,
   timeout_command : String?,
   target : String?,
 ) -> MutationResult {

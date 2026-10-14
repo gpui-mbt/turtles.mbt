@@ -1,5 +1,5 @@
 ///|
-async fn execute() -> Int {
+async fn execute() -> Int32 {
   let config = parse_args(@env.args())
   execute_with_config(config)
 }
@@ -56,7 +56,7 @@ async fn iterate_reuse(
   files : Map[String, String],
   moon_version : String?,
   target : String?,
-  pbt_amplify : Int?,
+  pbt_amplify : Int32?,
 ) -> Array[MutationResult?] {
   let reuse : Array[MutationResult?] = Array::make(mutations.length(), None)
   let report_path = path_join(output_dir, "report.json")
@@ -169,7 +169,7 @@ async fn print_mutation_list(
 }
 
 ///|
-async fn execute_with_config(config : Config) -> Int {
+async fn execute_with_config(config : Config) -> Int32 {
   let root = @fs.realpath(config.dir)
   ensure_moonbit_module(root)
   let project_config = load_project_config(root)
@@ -379,11 +379,11 @@ fn describe_result(result : MutationResult) -> String {
 /// count as not-killed in the score, so timing-out code cannot hide behind a
 /// threshold. Setup failures exit 2 regardless (handled by `main`).
 fn final_exit_code(
-  survived : Int,
-  timeout : Int,
+  survived : Int32,
+  timeout : Int32,
   score : Double,
   fail_under : Double?,
-) -> Int {
+) -> Int32 {
   match fail_under {
     Some(threshold) => if score >= threshold { 0 } else { 1 }
     None => if survived > 0 || timeout > 0 { 1 } else { 0 }
