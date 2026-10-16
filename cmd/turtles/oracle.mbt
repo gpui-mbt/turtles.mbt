@@ -25,7 +25,7 @@ fn test_kind_name(kind : TestKind) -> String {
 struct Kill {
   pkg : String
   filename : String
-  index : Int
+  index : Int32
   test_name : String
   kind : TestKind
   counterexample : String?

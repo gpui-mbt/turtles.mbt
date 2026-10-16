@@ -3,8 +3,8 @@
 /// sit outside `mutation_identity`, so they are fixed here.
 fn pbt_mutation(
   path : String,
-  start : Int,
-  end : Int,
+  start : Int32,
+  end : Int32,
   original : String,
   replacement : String,
 ) -> Mutation {
@@ -23,7 +23,7 @@ fn pbt_mutation(
 
 ///|
 test "prop mutation fingerprints are stable for identical inputs" {
-  @quickcheck.check((input : (String, Int, Int, String, String)) => {
+  @quickcheck.check((input : (String, Int32, Int32, String, String)) => {
     let (path, start, end, original, replacement) = input
     let mutation = pbt_mutation(path, start, end, original, replacement)
     // Same content, independently constructed: identity and id must match.
@@ -39,7 +39,7 @@ test "prop mutation fingerprints are stable for identical inputs" {
 test "prop mutation_identity separates every field" {
   // Appending a sentinel to any one field must change the identity: the
   // NUL separators keep "a\0b" inside one field from merging into the next.
-  @quickcheck.check((input : (String, Int, Int, String, String)) => {
+  @quickcheck.check((input : (String, Int32, Int32, String, String)) => {
     let (path, start, end, original, replacement) = input
     let base = pbt_mutation(path, start, end, original, replacement)
     let base_identity = mutation_identity(base)
@@ -57,7 +57,7 @@ test "prop mutation_identity separates every field" {
 test "prop mutation_identity ignores line column and visibility" {
   // Identity is content-anchored: display metadata and the visibility
   // bucket must not change it.
-  @quickcheck.check((input : (String, Int, Int, String, String, Int)) => {
+  @quickcheck.check((input : (String, Int32, Int32, String, String, Int32)) => {
     let (path, start, end, original, replacement, line) = input
     let base = pbt_mutation(path, start, end, original, replacement)
     let base_identity = mutation_identity(base)

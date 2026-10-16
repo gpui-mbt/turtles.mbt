@@ -98,6 +98,20 @@ async test "collect_moonbit_files applies skip, suffix, and filter rules" {
 }
 
 ///|
+async test "module-relative paths use portable separators" {
+  let temp = @fs.tmpdir(prefix="turtles-path")
+  @async.with_task_group(group => {
+    group.add_defer(() => @fs.rmdir(temp, recursive=true))
+    let root = path_join(temp, "module")
+    let nested = path_join(root, "pkg/nested")
+    @fs.mkdir(nested, recursive=true)
+    let source = path_join(nested, "lib.mbt")
+    write_file(source, "pub fn value() -> Int { 1 }\n")
+    assert_eq(relative_path(root, source), "pkg/nested/lib.mbt")
+  })
+}
+
+///|
 async test "nested module directories are not collected" {
   let temp = @fs.tmpdir(prefix="turtles-test")
   @async.with_task_group(group => {
@@ -122,6 +136,7 @@ async test "nested module directories are not collected" {
 }
 
 ///|
+#cfg(not(platform="windows"))
 async test "observed_permission mirrors read, write, and execute bits" {
   let temp = @fs.tmpdir(prefix="turtles-test")
   @async.with_task_group(group => {
@@ -170,6 +185,7 @@ async test "copy_tree omits skipped directories" {
 }
 
 ///|
+#cfg(not(platform="windows"))
 async test "force_rmdir removes read-only directory trees" {
   let temp = @fs.tmpdir(prefix="turtles-test")
   @async.with_task_group(group => {
@@ -308,6 +324,7 @@ async fn make_module_tree(dir : String) -> Unit {
 }
 
 ///|
+#cfg(not(platform="windows"))
 async test "copied regular files preserve permission bits" {
   let temp = @fs.tmpdir(prefix="turtles-test")
   @async.with_task_group(group => {
@@ -338,6 +355,7 @@ async test "copied regular files preserve permission bits" {
 }
 
 ///|
+#cfg(not(platform="windows"))
 async test "read-only directories copy with their contents" {
   let temp = @fs.tmpdir(prefix="turtles-test")
   @async.with_task_group(group => {
@@ -361,6 +379,25 @@ async test "read-only directories copy with their contents" {
       "content",
     )
     assert_true(!@fs.can_write(copied_dir))
+  })
+}
+
+///|
+#cfg(platform="windows")
+async test "copying regular files preserves contents with inherited ACLs" {
+  let temp = @fs.tmpdir(prefix="turtles-test")
+  @async.with_task_group(group => {
+    group.add_defer(() => @fs.rmdir(temp, recursive=true))
+    let source = path_join(temp, "source")
+    make_module_tree(source)
+    write_file(path_join(source, "data.txt"), "Windows file content")
+    let workspace = path_join(temp, "workspace")
+    @fs.mkdir(workspace, recursive=true)
+    copy_tree(source, source, workspace)
+    assert_eq(
+      @fs.read_file(path_join(workspace, "data.txt")).text(),
+      "Windows file content",
+    )
   })
 }
 

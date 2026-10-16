@@ -46,7 +46,7 @@ fn is_check_callee(
 /// right-to-left so earlier offsets stay valid.
 struct AmplifyEdits {
   mut changed : Bool
-  edits : Array[(Int, Int, String)]
+  edits : Array[(Int32, Int32, String)]
 }
 
 ///|
@@ -57,8 +57,8 @@ fn AmplifyEdits::new() -> AmplifyEdits {
 ///|
 fn AmplifyEdits::push(
   self : AmplifyEdits,
-  start : Int,
-  end : Int,
+  start : Int32,
+  end : Int32,
   text : String,
 ) -> Unit {
   self.edits.push((start, end, text))
@@ -80,9 +80,9 @@ fn argument_label(arg : @syntax.Argument) -> String? {
 /// Visitor collecting the rewrites for one file.
 struct AmplifyVisitor {
   bytes : Bytes
-  boundaries : Array[Int]
+  boundaries : Array[Int32]
   pkg_imports : Map[String, String]
-  factor : Int
+  factor : Int32
   edits : AmplifyEdits
 }
 
@@ -94,8 +94,8 @@ impl @syntax.IterVisitor for AmplifyVisitor with fn visit_Expr_Apply(
   loc~,
 ) {
   if is_check_callee(func, self.pkg_imports) {
-    let mut count_at : (Int, Int)? = None
-    let mut seed_at : (Int, Int)? = None
+    let mut count_at : (Int32, Int32)? = None
+    let mut seed_at : (Int32, Int32)? = None
     for arg in args {
       match argument_label(arg) {
         Some("count") | Some("max_success") =>
@@ -196,7 +196,7 @@ fn amplify_rewrite_file(
   source : String,
   file : String,
   index : ModuleIndex,
-  factor : Int,
+  factor : Int32,
 ) -> String? {
   let (impls, reports) = @parser.parse_string(source, name=file)
   if reports.length() != 0 {
@@ -257,11 +257,11 @@ async fn run_pbt_amplify(
   reference : String,
   results : Array[MutationResult],
   index : ModuleIndex,
-  factor : Int,
-  check_timeout_ms : Int,
-  test_timeout_ms : Int,
-  group_kill : Bool,
-  target? : String? = None,
+  factor : Int32,
+  check_timeout_ms : Int32,
+  test_timeout_ms : Int32,
+  timeout_command : String?,
+  target~ : String? = None,
 ) -> Unit {
   let manifest = Ref(snapshot_workspace(workspace))
   for i, result in results {
@@ -276,7 +276,7 @@ async fn run_pbt_amplify(
         workspace,
         ["check"],
         check_timeout_ms,
-        group_kill,
+        timeout_command,
         target~,
       ) {
       CommandSuccess =>
@@ -284,7 +284,7 @@ async fn run_pbt_amplify(
           workspace,
           mutant_test_args(result.packages),
           test_timeout_ms * factor,
-          group_kill,
+          timeout_command,
           target~,
         )
         is CommandSuccess
@@ -312,7 +312,7 @@ async fn run_pbt_amplify(
         workspace,
         ["check"],
         check_timeout_ms,
-        group_kill,
+        timeout_command,
         target~,
       ) {
       CommandSuccess =>
@@ -320,7 +320,7 @@ async fn run_pbt_amplify(
           workspace,
           mutant_test_args(result.packages),
           test_timeout_ms * factor,
-          group_kill,
+          timeout_command,
           target~,
         )
         is CommandFailure
@@ -346,7 +346,7 @@ async fn run_pbt_amplify(
 async fn rewrite_amplified_workspace(
   workspace : String,
   index : ModuleIndex,
-  factor : Int,
+  factor : Int32,
 ) -> Unit {
   let files : Array[String] = []
   collect_all_moonbit_files(workspace, workspace, files)

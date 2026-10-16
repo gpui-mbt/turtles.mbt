@@ -1,8 +1,8 @@
 ///|
 fn mk_mutation(
   path : String,
-  start : Int,
-  end : Int,
+  start : Int32,
+  end : Int32,
   original : String,
   replacement : String,
 ) -> Mutation {
@@ -21,7 +21,7 @@ fn mk_mutation(
 
 ///|
 fn mk_prior(
-  schema : Int,
+  schema : Int32,
   turtles : String?,
   moon : String?,
   file_hash : String,
@@ -247,18 +247,16 @@ async test "iterate round-trips killed_by attribution from a prior report" {
   let temp = @fs.tmpdir(prefix="turtles-iterate")
   @async.with_task_group(group => {
     group.add_defer(() => @fs.rmdir(temp, recursive=true))
-    let kills_json = [
-        {
-          pkg: "probe/p",
-          filename: "lib_test.mbt",
-          index: 0,
-          test_name: "prop idempotent",
-          kind: Property,
-          counterexample: Some("0"),
-        },
-      ]
-      .to_json()
-      .stringify()
+    let kills_json = Json([
+      {
+        pkg: "probe/p",
+        filename: "lib_test.mbt",
+        index: 0,
+        test_name: "prop idempotent",
+        kind: Property,
+        counterexample: Some("0"),
+      },
+    ]).stringify()
     let mutant_json = "{\"path\":\"a.mbt\",\"offset\":0,\"end\":1,\"group\":\"arithmetic\",\"original\":\"+\",\"replacement\":\"-\",\"outcome\":\"KILLED\",\"line\":1,\"column\":1,\"killed_by\":\{kills_json}}"
     let report = "{\"schema\":3,\"turtles_version\":\"\{turtles_version}\",\"moon_version\":\"moon x\",\"files\":{\"a.mbt\":\"hash-a\"},\"mutants\":[\{mutant_json}]}"
     @fs.write_file(path_join(temp, "report.json"), report)

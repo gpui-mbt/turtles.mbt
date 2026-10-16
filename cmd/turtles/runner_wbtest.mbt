@@ -1,4 +1,251 @@
 ///|
+#cfg(all(target="native", not(platform="windows")))
+#borrow(argv)
+extern "C" fn turtles_darwin_supervise(
+  timeout_ms : Int32,
+  argv : Bytes,
+) -> Int32 = "turtles_darwin_supervise"
+
+///|
+#cfg(all(target="native", not(platform="windows")))
+fn encode_supervisor_argv(args : Array[String]) -> Bytes {
+  let encoded = @buffer.Buffer()
+  for arg in args {
+    encoded.write_string_utf8(arg[:])
+    encoded.write_byte(b'\x00')
+  }
+  encoded.to_bytes()
+}
+
+///|
+// The timeout probe must survive an absent `timeout` executable, then select
+// the next candidate. Absolute paths make this test independent of PATH.
+#cfg(all(target="native", not(platform="windows")))
+async test "missing group-timeout executable falls through to the next candidate" {
+  let temp = @fs.tmpdir(prefix="turtles-timeout-probe")
+  @async.with_task_group(group => {
+    group.add_defer(() => @fs.rmdir(temp, recursive=true))
+    let missing = path_join(temp, "missing-timeout")
+    let gtimeout = path_join(temp, "gtimeout")
+    @fs.write_file(gtimeout, "#!/bin/sh\nexit 0\n")
+    @fs.chmod(gtimeout, 0o755)
+    let found = probe_group_timeout_from(temp, [missing, gtimeout])
+    assert_eq(found, Some(gtimeout))
+  })
+}
+
+///|
+/// Exercise the real GNU helper when available. A KILL timeout and a child
+/// that exits 137 can have the same shell status, so the helper diagnostic
+/// must distinguish them before classification.
+#cfg(all(target="native", not(platform="windows")))
+async test "GNU group timeout distinguishes expiry from child exit 137" {
+  let temp = @fs.tmpdir(prefix="turtles-timeout-result")
+  @async.with_task_group(group => {
+    group.add_defer(() => @fs.rmdir(temp, recursive=true))
+    match
+      probe_group_timeout_from(temp, [
+        "gtimeout", "/opt/homebrew/bin/gtimeout", "timeout",
+      ]) {
+      Some(executable) => {
+        let expired_log = temp + "/expired.log"
+        let expired_output = @process.redirect_to_file(expired_log)
+        let expired = @process.run(
+          executable,
+          ["--verbose", "--signal=KILL", "0.1", "/bin/sleep", "5"],
+          stdout=expired_output,
+          stderr=expired_output,
+        )
+        let expiry_text = @fs.read_file(expired_log).text()
+        let expired_by_helper = group_timeout_sent_kill(expiry_text)
+        assert_true(
+          group_timeout_result(Some(expired), expired_by_helper) ==
+          CommandTimeout,
+        )
+        let child_log = temp + "/child-137.log"
+        let child_output = @process.redirect_to_file(child_log)
+        let child_exit = @process.run(
+          executable,
+          ["--verbose", "--signal=KILL", "5", "/bin/sh", "-c", "exit 137"],
+          stdout=child_output,
+          stderr=child_output,
+        )
+        assert_eq(child_exit, 137)
+        let child_text = @fs.read_file(child_log).text()
+        assert_true(
+          group_timeout_result(
+            Some(child_exit),
+            group_timeout_sent_kill(child_text),
+          ) ==
+          CommandFailure,
+        )
+      }
+      None => println("Skipping GNU timeout regression: helper is unavailable")
+    }
+  })
+}
+
+///|
+/// The native Darwin supervisor must preserve ordinary command statuses;
+/// only its private timeout marker turns a command into TIMEOUT.
+#cfg(all(target="native", not(platform="windows")))
+test "Darwin process-group supervisor preserves child exit status" {
+  if turtles_is_darwin() {
+    assert_eq(
+      turtles_darwin_supervise(
+        3000,
+        encode_supervisor_argv(["/bin/sh", "-c", "exit 0"]),
+      ),
+      0,
+    )
+    assert_eq(
+      turtles_darwin_supervise(
+        3000,
+        encode_supervisor_argv(["/bin/sh", "-c", "exit 7"]),
+      ),
+      7,
+    )
+  }
+}
+
+///|
+/// An exec failure is reported as an ordinary failed command, not as a
+/// supervisor-cleanup error that aborts the whole mutation run.
+#cfg(all(target="native", not(platform="windows")))
+test "Darwin process-group supervisor preserves exec failure status" {
+  if turtles_is_darwin() {
+    let status = turtles_darwin_supervise(
+      3000,
+      encode_supervisor_argv(["/dev/null"]),
+    )
+    assert_eq(status, 127)
+    assert_true(darwin_supervisor_result(Some(status), "") == CommandFailure)
+  }
+}
+
+///|
+/// Cancellation can happen to a worker while its configured command timeout
+/// is still pending. The process tree must be cleaned before that worker
+/// propagates cancellation to its parent.
+#cfg(all(target="native", platform="windows"))
+async test "external cancellation terminates the owned moon process tree" {
+  let cwd = @env.current_dir().unwrap()
+  // The directory name also checks that both the working and output paths
+  // survive Windows API handling when they contain spaces.
+  let temp = path_join(cwd, ".turtles external cancel-\{@async.now()}")
+  @async.with_task_group() <| group => {
+    group.add_defer(() => {
+      @fs.rmdir(temp, recursive=true)
+      @fs.remove(temp + "-moon-output.log") catch {
+        _ => ()
+      }
+    })
+    @fs.mkdir(temp)
+    @fs.write_file(
+      path_join(temp, "moon.mod"),
+      (
+        #|name = "f4ah6o/turtles_external_cancel"
+        #|version = "0.1.0"
+        #|
+        #|import {
+        #|  "moonbitlang/async@0.22.4",
+        #|}
+        #|
+      ),
+    )
+    @fs.write_file(
+      path_join(temp, "moon.pkg"),
+      (
+        #|import {
+        #|  "moonbitlang/async",
+        #|  "moonbitlang/async/fs",
+        #|  "moonbitlang/async/process",
+        #|}
+        #|
+      ),
+    )
+    @fs.write_file(
+      path_join(temp, "cancel_test.mbt"),
+      (
+        #|async test "child outlives its test process" {
+        #|  let pid = @process.spawn_orphan(
+        #|    "powershell.exe",
+        #|    [
+        #|      "-NoLogo",
+        #|      "-NoProfile",
+        #|      "-NonInteractive",
+        #|      "-Command",
+        #|      "for ($i = 0; $i -lt 100; $i++) { [IO.File]::AppendAllText('heartbeat.txt', 'x'); Start-Sleep -Milliseconds 100 }",
+        #|    ],
+        #|  )
+        #|  @fs.write_file("child.pid", pid.to_string())
+        #|  @async.sleep(10000)
+        #|}
+        #|
+      ),
+    )
+    let runner = group.spawn(no_wait=true, () => {
+      run_moon_command(temp, ["test", "--target", "native"], 60000, None)
+    })
+    let started = @async.with_timeout_opt(60000, () => {
+      while !@fs.exists(path_join(temp, "heartbeat.txt")) {
+        @async.sleep(50)
+      }
+    })
+    if started is None {
+      runner.cancel()
+      ignore(
+        @async.with_timeout_opt(10000, () => {
+          runner.wait() catch {
+            @async.WaitedTaskAlreadyCancelled => CommandTimeout
+            error => raise error
+          }
+        }),
+      )
+      let output = @fs.read_file(temp + "-moon-output.log").text() catch {
+        _ => "no moon output was recorded"
+      }
+      fail("external cancellation fixture did not start its child: " + output)
+    }
+    runner.cancel()
+    let finished = @async.with_timeout_opt(10000, () => {
+      runner.wait() catch {
+        @async.WaitedTaskAlreadyCancelled => CommandTimeout
+        error => raise error
+      }
+    })
+    assert_true(finished is Some(CommandTimeout))
+    assert_true(@fs.exists(temp + "-moon-output.log"))
+    let after_termination = @fs.read_file(path_join(temp, "heartbeat.txt"))
+      .text()
+      .length()
+    @async.sleep(300)
+    let settled = @fs.read_file(path_join(temp, "heartbeat.txt"))
+      .text()
+      .length()
+    if settled != after_termination {
+      // Let the bounded fixture finish naturally before failing, so a broken
+      // cleanup path never leaves its test executable or helper on the host.
+      @async.sleep(11000)
+      fail("external cancellation left the fixture's helper alive")
+    }
+  }
+}
+
+///|
+#cfg(all(target="native", platform="windows"))
+test "Windows moon command line escapes arguments with spaces and quotes" {
+  inspect(
+    windows_moon_command_line([
+      "test", "path with spaces", "quote\"and\\slash", "slash space\\", "",
+    ]),
+    content=(
+      #|moon.exe test "path with spaces" "quote\"and\slash" "slash space\\" ""
+    ),
+  )
+}
+
+///|
 async fn write_order_fixture(dir : String) -> Unit {
   @fs.write_file(
     path_join(dir, "moon.mod"),
@@ -188,11 +435,19 @@ async test "mutation pool bounds concurrency and preserves discovery order" {
         if in_flight.val > max_in_flight.val {
           max_in_flight.val = in_flight.val
         }
-        // The `+` mutant is claimed first but sleeps longest, so completion
-        // order differs from claim order; the slot array still has to line
-        // results up with the mutation each run was built for.
+        // Wait for both classifiers to enter before measuring overlap. Worker
+        // workspace setup is filesystem work and can exceed a short sleep on
+        // a loaded Windows runner; the bound keeps a scheduling regression
+        // from hanging the test.
+        let overlap_started = @async.now()
+        while in_flight.val < 2 && @async.now() - overlap_started < 5000 {
+          @async.sleep(10)
+        }
         let first = mutation.original == "+"
-        @async.sleep(if first { 80 } else { 20 })
+        // Once both classifiers have entered, the `+` mutation takes
+        // substantially longer than `-`, forcing completion order to differ
+        // from discovery order without depending on workspace setup latency.
+        @async.sleep(if first { 500 } else { 20 })
         in_flight.val = in_flight.val - 1
         let outcome = if first { Killed } else { Survived }
         (outcome, None, None)
@@ -411,7 +666,7 @@ async test "pristine workspace validation failure aborts as a setup error" {
     let workspace = path_join(temp, "workspace")
     @fs.mkdir(workspace, recursive=true)
     let mut raised = false
-    ignore(validate_workspace(workspace, workspace, 30000, false)) catch {
+    ignore(validate_workspace(workspace, workspace, 30000, None)) catch {
       _ => raised = true
     }
     assert_true(raised)

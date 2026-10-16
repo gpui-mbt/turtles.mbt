@@ -50,7 +50,7 @@ fn regression_paths(results : Array[MutationResult]) -> Array[String] {
 fn regression_test_block(
   result : MutationResult,
   kill : Kill,
-  ordinal : Int,
+  ordinal : Int32,
 ) -> String {
   let mutation = result.mutation
   let counterexample = match kill.counterexample {

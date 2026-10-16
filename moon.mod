@@ -1,10 +1,10 @@
 name = "f4ah6o/turtles"
 
-version = "0.3.0"
+version = "0.4.7"
 
 readme = "README.md"
 
-repository = "https://github.com/f4ah6o/turtles"
+repository = "https://github.com/gpui-mbt/turtles.mbt"
 
 license = "MIT"
 
@@ -20,4 +20,5 @@ import {
   "moonbitlang/parser@0.4.0",
   "moonbitlang/moon_config@0.4.0",
   "moonbitlang/x@0.5.5",
+  "moonbit-community/prettyprinter@0.4.11",
 }

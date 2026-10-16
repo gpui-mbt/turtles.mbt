@@ -68,6 +68,8 @@ jobs:
           assert report["summary"]["timeout"] == 0
           assert all("duration_ms" in mutant for mutant in report["mutants"])
           PY
+      - name: Verify GNU timeout classification and iteration
+        run: python3 scripts/timeout_smoke.py
       - name: Run turtles against isolation fixture
         run: |
           report="$RUNNER_TEMP/turtles-isolation-report.json"
@@ -350,3 +352,268 @@ jobs:
           PY
       - name: Binary self-verification e2e
         run: sh scripts/self_e2e.sh
+
+  macos-native:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify Apple Silicon runner
+        run: test "$(uname -m)" = arm64
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Update dependencies
+        run: moon update
+      - name: Check formatting
+        run: moon fmt --check
+      - name: Assert version consistency
+        run: |
+          mod_version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' moon.mod)
+          cli_version=$(sed -n 's/.*turtles_version *: *String *= *"\(.*\)".*/\1/p' cmd/turtles/config.mbt)
+          test "$mod_version" = "$cli_version"
+      - name: Check native target
+        run: moon check --target native --deny-warn
+      - name: Install GNU coreutils for timeout regression
+        run: |
+          brew install coreutils
+          echo "/opt/homebrew/bin" >> "$GITHUB_PATH"
+          test -x /opt/homebrew/bin/gtimeout
+      - name: Unit tests on Darwin
+        run: moon test --target native
+      - name: Verify Homebrew gtimeout classification and iteration
+        run: python3 scripts/timeout_smoke.py
+      - name: Run native mutation fixture without GNU timeout
+        shell: bash
+        run: |
+          set -euo pipefail
+          fallback_path="$HOME/.moon/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+          if PATH="$fallback_path" /bin/sh -c 'command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1'; then
+            echo "expected the Darwin process-group timeout fallback to be exercised" >&2
+            exit 1
+          fi
+          report="$RUNNER_TEMP/turtles-report.json"
+          PATH="$fallback_path" moon run cmd/turtles -- --dir fixtures/basic --timeout 30 --json "$report"
+          expected_version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' moon.mod)
+          test -n "$expected_version"
+          python3 - "$report" "$expected_version" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              report = json.load(handle)
+
+          assert report["schema"] == 3
+          assert report["turtles_version"] == sys.argv[2]
+          assert len(report["mutants"]) == 6
+          assert report["summary"]["killed"] == 6
+          assert report["summary"]["survived"] == 0
+          assert report["summary"]["timeout"] == 0
+          assert all("duration_ms" in mutant for mutant in report["mutants"])
+          PY
+      - name: Verify Darwin timeout and cancellation descendant cleanup
+        run: python3 scripts/darwin_timeout_smoke.py
+
+  windows-native:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: hustcer/setup-moonbit@v1
+      - name: Resolve dependencies
+        run: moon update
+      - name: Check version consistency
+        run: python scripts/release_version.py read --kind turtles
+      - name: Check formatting
+        run: moon fmt --check
+      - name: Check native target
+        run: moon check --target native --deny-warn
+      - name: Test native target
+        run: moon test --target native
+      - name: Run release guard tests
+        run: python -m unittest discover -s scripts/tests -p 'test_release_*.py' -v
+      - name: Test Windows smoke process tracking
+        run: python -m unittest discover -s scripts/tests -p 'test_windows_smoke.py' -v
+      - name: Run native fixtures, parallel workers, and target filtering
+        run: python scripts/windows_smoke.py
+
+  mbtx-validator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Update MoonBit registry
+        run: moon update
+      - name: Check standalone MoonBit validator formatting
+        run: moon fmt scripts/self_report.mbtx --check
+      - name: Test standalone MoonBit validator
+        run: moon test scripts/self_report.mbtx
+      - name: Run Python-free binary self-E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          blocked="$(mktemp -d)"
+          trap 'rm -rf "$blocked"' EXIT
+          for exe in python python3 py; do
+            printf '%s\n' '#!/bin/sh' ': > "$(dirname "$0")/invoked"' 'echo "unexpected Python invocation" >&2' 'exit 97' > "$blocked/$exe"
+            chmod +x "$blocked/$exe"
+          done
+          PATH="$blocked:$PATH" sh scripts/self_e2e.sh
+          test ! -e "$blocked/invoked"
+
+  published-cli-no-checkout:
+    timeout-minutes: 20
+    env:
+      TURTLES_RELEASE_VERSION: 0.4.7
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+        install: [registry, native-asset]
+        include:
+          - os: ubuntu-24.04
+            platform: linux-x86_64
+            executable: turtles
+            sha256: 5b8e342a3362e2239d261615733a0267081accdf5c838466cd390a5ec8c8c411
+          - os: macos-15
+            platform: darwin-aarch64
+            executable: turtles
+            sha256: 4bcb1140e889cf11e87dd4eae484951e754d8f58ba4cc442cdc2ba7f20b4d685
+          - os: windows-2025
+            platform: windows-x86_64.exe
+            executable: turtles.exe
+            sha256: 31032520584df4fb5fa720f233d135609b8d4b3c8394936fa27b794f428d38ca
+    runs-on: ${{ matrix.os }}
+    steps:
+      # A checkout would hide accidental dependencies on contributor scripts.
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - name: Quarantine the optional compiler telemetry helper in this disposable runner
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $compiler = (Get-Command cl.exe -ErrorAction Stop).Source
+          $helper = Join-Path (Split-Path $compiler) 'vctip.exe'
+          if (Test-Path -LiteralPath $helper) {
+            Move-Item -LiteralPath $helper -Destination "$helper.turtles-ci-disabled" -ErrorAction Stop
+          }
+          if (Test-Path -LiteralPath $helper) {
+            throw 'The optional MSVC telemetry helper is still available'
+          }
+          Write-Host 'Consumer gate environment: MSVC vctip helper unavailable; compiler and linker retained'
+      - uses: hustcer/setup-moonbit@v1
+      - name: Verify Apple Silicon runner
+        if: runner.os == 'macOS'
+        shell: bash
+        run: test "$(uname -m)" = arm64
+      - name: Install and run standalone consumer fixture with Python blocked
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e .git
+          test ! -e moon.mod
+          temp="$(mktemp -d)"
+          trap 'rm -rf "$temp"' EXIT
+          mkdir -p "$temp/module" "$temp/no-python" "$temp/bin"
+          for exe in python python3 py; do
+            printf '%s\n' '#!/bin/sh' ': > "$(dirname "$0")/invoked"' 'echo "unexpected Python invocation" >&2' 'exit 97' > "$temp/no-python/$exe"
+            chmod +x "$temp/no-python/$exe"
+            if [[ "$RUNNER_OS" == "Windows" ]]; then
+              printf '%s\r\n' '@echo off' 'echo invoked>"%~dp0invoked"' 'echo unexpected Python invocation 1>&2' 'exit /b 97' > "$temp/no-python/$exe.cmd"
+            fi
+          done
+          export PATH="$temp/no-python:$PATH"
+          cd "$temp/module"
+          moon version --all
+          moon update
+          asset="$temp/bin/${{ matrix.executable }}"
+          echo "Installing $TURTLES_RELEASE_VERSION via ${{ matrix.install }}"
+          if [[ "${{ matrix.install }}" == "registry" ]]; then
+            moon install "f4ah6o/turtles/cmd/turtles@$TURTLES_RELEASE_VERSION" --bin "$temp/bin"
+          else
+            curl -fsSL "https://github.com/gpui-mbt/turtles.mbt/releases/download/v$TURTLES_RELEASE_VERSION/turtles-${{ matrix.platform }}" -o "$asset"
+            if [[ "$RUNNER_OS" == "macOS" ]]; then
+              echo "${{ matrix.sha256 }}  $asset" | shasum -a 256 -c -
+            else
+              echo "${{ matrix.sha256 }}  $asset" | sha256sum -c -
+            fi
+            chmod +x "$asset"
+          fi
+          test "$("$asset" --version)" = "turtles $TURTLES_RELEASE_VERSION"
+          "$asset" --help
+          cat > moon.mod <<'MOD'
+          name = "smoke/clone_free"
+          version = "0.1.0"
+          preferred_target = "native"
+          MOD
+          touch moon.pkg
+          cat > plus.mbt <<'MBT'
+          ///|
+          pub fn plus(a : Int32, b : Int32) -> Int32 {
+            a + b
+          }
+          MBT
+          cat > plus_test.mbt <<'MBT'
+          ///|
+          test "plus" {
+            inspect(plus(1, 2), content="3")
+          }
+          MBT
+          echo "Running published CLI against the cold consumer fixture"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cat > "$temp/consumer.ps1" <<'PS1'
+          param([string]$Cli, [string]$Module, [string]$Report, [string]$Runtime)
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path $Runtime -Force | Out-Null
+          $env:TMP = $Runtime
+          $env:TEMP = $Runtime
+          $env:TMPDIR = $Runtime
+          $start = [System.Diagnostics.ProcessStartInfo]::new()
+          $start.FileName = $Cli
+          $start.WorkingDirectory = $Module
+          $start.UseShellExecute = $false
+          foreach ($argument in @('--dir', '.', '--timeout', '60', '--json', $Report)) {
+            $start.ArgumentList.Add($argument)
+          }
+          $consumerProcess = [System.Diagnostics.Process]::Start($start)
+          if (-not $consumerProcess.WaitForExit(120000)) {
+            $processes = @(Get-CimInstance Win32_Process)
+            $ownedIds = [System.Collections.Generic.HashSet[uint32]]::new()
+            $null = $ownedIds.Add([uint32]$consumerProcess.Id)
+            do {
+              $added = $false
+              foreach ($candidate in $processes) {
+                if ($ownedIds.Contains([uint32]$candidate.ParentProcessId)) {
+                  if ($ownedIds.Add([uint32]$candidate.ProcessId)) { $added = $true }
+                }
+              }
+            } while ($added)
+            $processes | Where-Object { $ownedIds.Contains([uint32]$_.ProcessId) } |
+              Select-Object ProcessId, ParentProcessId, Name, ExecutablePath |
+              Format-Table -AutoSize | Out-String | Write-Host
+            Write-Host 'Toolchain candidates with unconfirmed ownership (parents may have exited):'
+            $processes | Where-Object { $_.Name -match '^(moon|moonc|cl|link|vctip|mspdbsrv)\.exe$' } |
+              Select-Object ProcessId, ParentProcessId, Name, ExecutablePath |
+              Format-Table -AutoSize | Out-String | Write-Host
+            Get-ChildItem -Path $Runtime -Recurse -Filter '*moon-output.log' |
+              ForEach-Object { Write-Host $_.FullName; Get-Content $_.FullName -Tail 80 }
+            $consumerProcess.Kill($true)
+            $null = $consumerProcess.WaitForExit(10000)
+            throw 'Cold consumer fixture exceeded the 120-second CI diagnostic deadline'
+          }
+          exit $consumerProcess.ExitCode
+          PS1
+            pwsh -NoProfile -File "$(cygpath -w "$temp/consumer.ps1")" \
+              -Cli "$(cygpath -w "$asset")" -Module "$(cygpath -w "$temp/module")" \
+              -Report "$(cygpath -w "$temp/report.json")" -Runtime "$(cygpath -w "$temp/runtime")"
+          else
+            "$asset" --dir . --timeout 60 --json "$temp/report.json"
+          fi
+          jq -e --arg v "$TURTLES_RELEASE_VERSION" '.schema == 3 and .turtles_version == $v and (.mutants | length) == 1 and
+            .mutants[0].outcome == "KILLED" and .summary.killed == 1 and .summary.survived == 0 and
+            .summary.timeout == 0 and .summary.unviable == 0' "$temp/report.json"
+          test ! -e "$temp/no-python/invoked"

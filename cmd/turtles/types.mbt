@@ -95,8 +95,8 @@ fn ProjectConfig::operator_enabled(
 struct Config {
   dir : String
   target : String?
-  timeout_ms : Int
-  jobs : Int
+  timeout_ms : Int32
+  jobs : Int32
   fail_under : Double?
   list : Bool
   file_filter : String?
@@ -109,16 +109,16 @@ struct Config {
   emit_regressions : Bool
   emit_properties : Bool
   pbt_witness : Bool
-  pbt_amplify : Int?
+  pbt_amplify : Int32?
 }
 
 ///|
 struct Mutation {
   path : String
-  start : Int
-  end : Int
-  line : Int
-  column : Int
+  start : Int32
+  end : Int32
+  line : Int32
+  column : Int32
   group : OperatorGroup
   original : String
   replacement : String
@@ -186,10 +186,10 @@ struct MutationResult {
 struct JsonMutation {
   id : String
   path : String
-  line : Int
-  column : Int
-  offset : Int
-  end : Int
+  line : Int32
+  column : Int32
+  offset : Int32
+  end : Int32
   group : String
   visibility : String
   original : String
@@ -207,22 +207,22 @@ struct JsonMutation {
 
 ///|
 struct JsonKillCounts {
-  property : Int
-  snapshot : Int
-  doc_test : Int
-  assertion : Int
+  property : Int32
+  snapshot : Int32
+  doc_test : Int32
+  assertion : Int32
 } derive(Debug, ToJson)
 
 ///|
 struct JsonSummary {
-  killed : Int
-  survived : Int
-  timeout : Int
-  unviable : Int
-  reused : Int
+  killed : Int32
+  survived : Int32
+  timeout : Int32
+  unviable : Int32
+  reused : Int32
   score : Double
   kills_by_kind : JsonKillCounts
-  property_only_kills : Int
+  property_only_kills : Int32
   score_public : JsonVisibilitySummary
   score_private : JsonVisibilitySummary
 } derive(ToJson)
@@ -233,11 +233,11 @@ struct JsonSummary {
 /// bucket's mutants. Test-block mutants are counted in the headline
 /// score only; they appear in neither bucket.
 struct JsonVisibilitySummary {
-  mutants : Int
-  killed : Int
-  survived : Int
-  timeout : Int
-  unviable : Int
+  mutants : Int32
+  killed : Int32
+  survived : Int32
+  timeout : Int32
+  unviable : Int32
   score : Double
 } derive(Debug, ToJson)
 
@@ -261,19 +261,19 @@ struct SkippedFile {
 /// (`#turtles.skip` or a `// turtles: skip` line comment).
 struct SkippedBlock {
   path : String
-  line : Int
+  line : Int32
 }
 
 ///|
 struct JsonReport {
-  schema : Int
+  schema : Int32
   module_path : String
   turtles_version : String
   moon_version : String?
   target : String?
   /// Mutants Moon does not compile for the selected target: reported but
   /// never classified, so they cannot distort the score.
-  inactive_mutants : Int
+  inactive_mutants : Int32
   /// Sorted module-relative paths contributing at least one inactive mutant.
   inactive_files : Array[String]
   baseline_duration_ms : Int64

@@ -67,7 +67,7 @@ test "prop parse_counterexample is absent without a counterexample line" {
 
 ///|
 test "prop parse_kill_line decodes the documented json shape" {
-  @quickcheck.check((input : (String, String, Int, String, String)) => {
+  @quickcheck.check((input : (String, String, Int32, String, String)) => {
     let (pkg, filename, index, test_name, message) = input
     let line = (
       {

@@ -40,11 +40,11 @@ struct FnInfo {
   /// body to clone
   stub : Bool
   /// byte span of the whole `fn` item inside `file`
-  impl_start : Int
-  impl_end : Int
+  impl_start : Int32
+  impl_end : Int32
   /// byte span of the fn name token inside `file`
-  name_start : Int
-  name_end : Int
+  name_start : Int32
+  name_end : Int32
   /// module-local functions referenced anywhere in the body, (pkg, name)
   edges : Array[(String, String)]
   mut effects_unknown : Bool
@@ -203,7 +203,10 @@ fn is_arbitrable_type(ty : @syntax.Type) -> Bool {
 
 ///|
 /// Byte span of an AST location in `boundaries` terms.
-fn loc_bytes(boundaries : Array[Int], loc : @basic.Location) -> (Int, Int) {
+fn loc_bytes(
+  boundaries : Array[Int32],
+  loc : @basic.Location,
+) -> (Int32, Int32) {
   (
     source_byte_offset(boundaries, loc.start.cnum),
     source_byte_offset(boundaries, loc.end.cnum),
@@ -599,6 +602,7 @@ async fn collect_pkg_dirs(root : String) -> Map[String, Bool] {
 /// Owning package dir of a module-relative source path — the deepest
 /// manifest dir containing it.
 fn pkg_dir_of(pkg_dirs : Map[String, Bool], path : String) -> String {
+  let path = path.replace_all(old="\\", new="/")
   let mut best = "."
   for dir, _ in pkg_dirs {
     let contains = if dir == "." { true } else { path.has_prefix(dir + "/") }
@@ -617,9 +621,9 @@ fn pkg_dir_of(pkg_dirs : Map[String, Bool], path : String) -> String {
 ///|
 /// Find `import { ... }` blocks in moon.pkg text and return (content
 /// range, whether a `for "..."` scope follows the closing brace) for each.
-fn pkg_import_blocks(text : String) -> Array[((Int, Int), Bool)] {
+fn pkg_import_blocks(text : String) -> Array[((Int32, Int32), Bool)] {
   let bytes = @utf8.encode(text)
-  let blocks : Array[((Int, Int), Bool)] = []
+  let blocks : Array[((Int32, Int32), Bool)] = []
   let mut i = 0
   let n = bytes.length()
   while i < n {
@@ -677,7 +681,7 @@ fn pkg_import_blocks(text : String) -> Array[((Int, Int), Bool)] {
 
 ///|
 /// Extract `"path"` strings inside a moon.pkg import-block content range.
-fn pkg_import_paths(text : String, start : Int, end : Int) -> Array[String] {
+fn pkg_import_paths(text : String, start : Int32, end : Int32) -> Array[String] {
   let bytes = @utf8.encode(text)
   let paths : Array[String] = []
   let mut i = if start < 0 { 0 } else { start }
@@ -865,7 +869,7 @@ fn fn_info_of(
   pkg : String,
   file : String,
   bytes : Bytes,
-  boundaries : Array[Int],
+  boundaries : Array[Int32],
   fun_decl : @syntax.FunDecl,
   decl_body : @syntax.DeclBody,
   loc : @basic.Location,

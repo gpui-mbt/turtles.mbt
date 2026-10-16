@@ -30,7 +30,7 @@ fn witness_helper_candidates(entry : FnInfo, mutid : String) -> Array[String] {
 fn witness_test_names(
   entry : FnInfo,
   mutid : String,
-  suffix : Int,
+  suffix : Int32,
 ) -> Array[String] {
   let base = "turtles witness \{mutid} \{entry.name}"
   let guard_name = "\{base} guard\{suffix_tag(suffix)}"
@@ -39,7 +39,7 @@ fn witness_test_names(
 }
 
 ///|
-fn suffix_tag(suffix : Int) -> String {
+fn suffix_tag(suffix : Int32) -> String {
   if suffix == 0 {
     ""
   } else {
@@ -239,9 +239,9 @@ async fn run_pbt_witness(
   reference : String,
   results : Array[MutationResult],
   index : ModuleIndex,
-  test_timeout_ms : Int,
-  group_kill : Bool,
-  target? : String? = None,
+  test_timeout_ms : Int32,
+  timeout_command : String?,
+  target~ : String? = None,
 ) -> Unit {
   let manifest = Ref(snapshot_workspace(workspace))
   for i, result in results {
@@ -278,7 +278,7 @@ async fn run_pbt_witness(
     }
     results[i] = witness_one(
       workspace, entry, result, helper, guard_name, witness_name, test_timeout_ms,
-      group_kill, target,
+      timeout_command, target,
     )
     sweep_workspace(workspace, reference, manifest.val) catch {
       _ => manifest.val = rebuild_workspace(workspace, reference)
@@ -298,8 +298,8 @@ async fn witness_one(
   helper : String,
   guard_name : String,
   witness_name : String,
-  test_timeout_ms : Int,
-  group_kill : Bool,
+  test_timeout_ms : Int32,
+  timeout_command : String?,
   target : String?,
 ) -> MutationResult {
   let harness_error = {
@@ -323,7 +323,13 @@ async fn witness_one(
     return harness_error
   }
   match
-    run_moon_command(workspace, ["check"], test_timeout_ms, group_kill, target~) {
+    run_moon_command(
+      workspace,
+      ["check"],
+      test_timeout_ms,
+      timeout_command,
+      target~,
+    ) {
     CommandSuccess => ()
     _ => return harness_error
   }
@@ -332,7 +338,7 @@ async fn witness_one(
       workspace,
       mutant_test_args(result.packages),
       test_timeout_ms,
-      group_kill,
+      timeout_command,
       target~,
     ) {
     CommandSuccess => WitnessNone

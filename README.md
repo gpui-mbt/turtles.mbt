@@ -4,28 +4,34 @@ Mutation testing for MoonBit projects — the `cargo-mutants` idea, implemented 
 
 `turtles` finds small source-level changes ("mutants"), applies them one at a time in a **temporary copy** of your MoonBit module, and asks your tests to catch them. Surviving mutants point at behavior your tests don't actually pin down. Your working tree is never intentionally modified.
 
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
 ## Install
 
 The supported way to install `turtles` is `moon install`, which builds the native executable from source (requires the MoonBit toolchain). It puts a `turtles` binary in `~/.moon/bin` (the same directory `moon` itself lives in, so it is usually already on `PATH`). Override the destination with `--bin <DIR>`.
 
 ### Stable — Mooncakes
 
-The registry package is the default install path; `@0.3.0` pins the current release:
+The registry package is the default install path. **No turtles repository clone and no Python interpreter are required** to install or run the CLI; `moon install` fetches the published Mooncakes module and builds the native executable. The MoonBit toolchain remains required at runtime because turtles invokes `moon check` and `moon test` for the project under test. The published 0.4.7 package's pinned install command is:
 
 ```sh
-moon install f4ah6o/turtles/cmd/turtles@0.3.0
+moon install f4ah6o/turtles/cmd/turtles@0.4.7
 ```
+
+The installed `turtles` executable does not run any of the repository's `scripts/*.py` files. Those scripts are for contributor CI, release verification, platform regressions, and an optional experimental proof companion, not for mutation testing users. `.mbtx` is useful for standalone MoonBit automation (including our self-E2E validator), but it is not needed to launch this native CLI. `moonx` runs published Wasm executables; `cmd/turtles` currently supports native only and uses native process-control stubs, so use `moon install` or the native release asset rather than `moonx`.
+
+Version 0.4.7 fixes the MoonBit 0.1.20261012 compatibility and obsolete dependency-manifest errors affecting 0.4.6, and pins `prettyprinter@0.4.11`. Both the Mooncakes package and [v0.4.7 native release assets](https://github.com/gpui-mbt/turtles.mbt/releases/tag/v0.4.7) are published. CI independently tests registry installation and checksum-verified native assets on Linux x86_64, macOS Apple Silicon, and Windows x86_64, from unrelated modules with Python commands blocked and without checking out turtles. Windows source-package installation also requires an MSVC build environment. Windows native-asset CI currently disables the optional MSVC `vctip.exe` helper in its disposable runner: a fresh, unmodified toolchain can leave the 0.4.7 CLI waiting after baseline tests pass. Prefer the Mooncakes install route; the remaining cold-start limitation is tracked in [this follow-up](issues/open/20261014-windows-cold-native-compiler-helper.md).
 
 ### Development — GitHub
 
 ```sh
-moon install https://github.com/f4ah6o/turtles.git cmd/turtles --branch main
+moon install https://github.com/gpui-mbt/turtles.mbt.git cmd/turtles --branch main
 ```
 
-Pin a release once tags are published:
+Install from the matching source tag after it is created:
 
 ```sh
-moon install https://github.com/f4ah6o/turtles.git cmd/turtles --tag v0.3.0
+moon install https://github.com/gpui-mbt/turtles.mbt.git cmd/turtles --tag v0.4.7
 ```
 
 ### From a local clone
@@ -37,7 +43,7 @@ moon install ./cmd/turtles
 ## First run in 30 seconds
 
 ```sh
-turtles --version          # turtles 0.3.0
+turtles --version          # turtles 0.4.7 for this source release
 turtles --help
 
 cd path/to/your-moonbit-module
@@ -82,7 +88,7 @@ Note that `moon` itself already parallelizes a single build; `--jobs` paralleliz
 Install a pinned release and run turtles against your module:
 
 ```sh
-moon install f4ah6o/turtles/cmd/turtles@0.3.0
+moon install f4ah6o/turtles/cmd/turtles@0.4.7
 turtles --dir . --fail-under 80 --json turtles-report.json
 ```
 
@@ -128,6 +134,12 @@ Outcome classification:
 - **TIMEOUT** — checking or testing exceeded the configured timeout.
 - **UNVIABLE** — `moon check` rejected the mutated source.
 
+On macOS, `timeout` is not included with the system tools. If GNU coreutils'
+`gtimeout` is on `PATH`, turtles uses it to terminate the command's process
+group. Without it, a native supervisor starts `moon` in its own process group
+and terminates the group on timeout or cancellation. Descendants that detach
+into another session or process group are outside that supervisor's scope.
+
 After the summary counts, every `SURVIVED`/`TIMEOUT` mutant is reprinted under `Mutants needing attention:` so the actionable list is at the end of the output.
 
 Every run writes a schema-`3` report and per-survivor unified diffs to `<dir>/.turtles/` (which git-ignores itself): `report.json` plus `survivors/<id>.diff` for each surviving or timed-out mutant. The report adds stable mutant `id`s (FNV-1a over path + byte offsets + original + replacement + group), per-phase baseline durations (`baseline_check_ms`/`baseline_test_ms`), `test_scope`, a `files` fingerprint map, `skipped_files`, `reused` counts, the selected `target` (`null` when `--target` is omitted), and `inactive_mutants`/`inactive_files` for mutants Moon does not compile under that target:
@@ -136,7 +148,7 @@ Every run writes a schema-`3` report and per-survivor unified diffs to `<dir>/.t
 {
   "schema": 3,
   "module": "/abs/path",
-  "turtles_version": "0.3.0",
+  "turtles_version": "0.4.7",
   "moon_version": "moon 0.1.20260920 (914d7da 2026-09-20) ~/.moon/bin/moon",
   "target": "native",
   "inactive_mutants": 1,
@@ -269,4 +281,35 @@ The real fixture E2E also validates schema-3 JSON report generation, determinist
 
 ## Planned follow-ups
 
-JUnit reports, richer survivor context, and smarter default test selection are still open. Prebuilt release binaries remain out of scope — turtles needs the MoonBit toolchain at runtime anyway.
+JUnit reports, richer survivor context, and smarter default test selection are still open. The native executables are distributed as release assets; running turtles still requires the MoonBit toolchain.
+
+## Versioned native releases
+
+Edit the `version` field in `moon.mod` to the intended SemVer version
+(e.g., `0.4.6` to `0.4.7`) and merge that change into `main`.
+The release workflow compares the previous and new **version values**, not
+just the file modification date. On a version increase it validates
+version consistency, builds four native platforms, then creates the
+`vX.Y.Z` tag and GitHub Release for the matching commit.
+Other changes to `moon.mod` do not publish. Version downgrades fail.
+
+The raw executable assets are named `turtles-linux-x86_64`,
+`turtles-linux-aarch64`, `turtles-darwin-aarch64`, and
+`turtles-windows-x86_64.exe`. GitHub exposes a SHA-256 digest for each
+uploaded asset.
+
+An explicitly pushed `vX.Y.Z` tag remains supported only when the tag
+matches `moon.mod`; the workflow never edits source versions or bumps
+versions on its own. Publishing requires successful binary builds and
+GitHub Actions permission to create a Release.
+If a release already exists as a draft, prerelease, or incomplete asset set,
+publishing stops and preserves it for manual repair. If tag lookup and the
+paginated release list disagree, publishing also stops for manual review.
+
+Update `cmd/turtles/config.mbt`'s `turtles_version` alongside `moon.mod`.
+
+After native publication succeeds, the workflow validates and publishes the
+same version to Mooncakes, then installs it from an unrelated directory with
+Python commands blocked and runs a mutation fixture. Configure repository
+secret `MOONCAKES_TOKEN` with a publish token or the JSON contents of
+`~/.moon/credentials.json`; the workflow fails explicitly if it is missing.

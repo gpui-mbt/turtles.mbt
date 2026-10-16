@@ -4,7 +4,7 @@
 /// counterexample.
 fn pbt_kill(
   test_name : String,
-  kind_raw : Int,
+  kind_raw : Int32,
   has_counterexample : Bool,
   counterexample : String,
 ) -> Kill {
@@ -30,7 +30,7 @@ fn pbt_kill(
 
 ///|
 /// Signed mod-4 bucket for picking a kill kind.
-fn pbt_mod4(raw : Int) -> Int {
+fn pbt_mod4(raw : Int32) -> Int32 {
   let m = raw % 4
   if m < 0 {
     m + 4
@@ -41,7 +41,7 @@ fn pbt_mod4(raw : Int) -> Int {
 
 ///|
 /// Signed mod-4 bucket for picking a mutation outcome.
-fn pbt_outcome(raw : Int) -> Outcome {
+fn pbt_outcome(raw : Int32) -> Outcome {
   match pbt_mod4(raw) {
     0 => Killed
     1 => Survived
@@ -55,11 +55,11 @@ fn pbt_outcome(raw : Int) -> Outcome {
 /// and whether attribution is present at all.
 fn pbt_result(
   path : String,
-  start : Int,
-  end : Int,
+  start : Int32,
+  end : Int32,
   original : String,
   replacement : String,
-  outcome_raw : Int,
+  outcome_raw : Int32,
   kills_present : Bool,
   kills : Array[Kill],
 ) -> MutationResult {
@@ -85,13 +85,13 @@ test "prop counterexample_kills keeps exactly the property kills with a countere
   @quickcheck.check((
     input : (
       String,
-      Int,
-      Int,
+      Int32,
+      Int32,
       String,
       String,
-      Int,
+      Int32,
       Bool,
-      Array[(String, Int, Bool, String)],
+      Array[(String, Int32, Bool, String)],
     ),
   ) => {
     let (
@@ -135,13 +135,13 @@ test "prop regression_relpath exists iff a counterexample kill exists" {
   @quickcheck.check((
     input : (
       String,
-      Int,
-      Int,
+      Int32,
+      Int32,
       String,
       String,
-      Int,
+      Int32,
       Bool,
-      Array[(String, Int, Bool, String)],
+      Array[(String, Int32, Bool, String)],
     ),
   ) => {
     let (
@@ -174,11 +174,11 @@ test "prop regression_source embeds every counterexample as comments" {
   @quickcheck.check((
     input : (
       String,
-      Int,
-      Int,
+      Int32,
+      Int32,
       String,
       String,
-      Array[(String, Int, Bool, String)],
+      Array[(String, Int32, Bool, String)],
     ),
   ) => {
     let (path, start, end, original, replacement, raw_kills) = input

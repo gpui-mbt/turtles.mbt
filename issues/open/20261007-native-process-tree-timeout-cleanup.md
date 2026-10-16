@@ -1,51 +1,47 @@
-# Native process-tree timeout cleanup on Windows and Apple Silicon macOS
+# Linux without GNU timeout: clean up the entire owned process tree
 
-Status: open — source finding; platform reproduction and implementation pending  
-Updated: 2026-10-07 (JST)
+Status: open — source-level gap; no fresh Linux-without-GNU-timeout runtime reproduction
+Priority: P1 (runtime reliability; not a P1 regression introduced by this docs PR)
+Updated: 2026-10-16 (JST)
+Scope: native turtles CLI on Linux when neither `gtimeout` nor GNU `timeout` can be used
 
-## Finding and scope
+## Evidence at current main
 
-At main `8a1816ab494c4595449608e940ca5663af966b74`,
-[run_moon_command](../../cmd/turtles/runner.mbt) uses GNU `timeout` for
-process-group termination only when its probe succeeds. With `group_kill=false`,
-the fallback hard-cancels the `moon` PID. The source explicitly notes that child
-compiler/test executables may remain orphaned.
+- [`cmd/turtles/runner.mbt`](../../cmd/turtles/runner.mbt) probes `gtimeout`/`timeout`. When a helper is available, it runs Moon inside the helper's process group; when unavailable on Darwin, it uses its own process-group supervisor.
+- In the remaining non-Windows, non-Darwin branch of `run_moon_command`, `@async.with_timeout_opt` runs `moon` with `cancel_handler=@process.hard_cancel()`. That fallback only identifies the immediate process for cancellation; the source does not establish termination/reaping of compiler/test descendants. This is a source-level risk, **not** a claim that Linux orphans were reproduced.
+- Windows now runs Moon in a scoped Job Object. [`scripts/windows_smoke.py`](../../scripts/windows_smoke.py) checks native timeout and persistent descendants. [`scripts/darwin_timeout_smoke.py`](../../scripts/darwin_timeout_smoke.py) checks Darwin without GNU timeout, including descendant termination and signal cancellation.
+- [CI run 38716379298](https://github.com/gpui-mbt/turtles.mbt/actions/runs/38716379298) completed/success on the later main line for the existing matrix. Its Linux timeout test is [`scripts/timeout_smoke.py`](../../scripts/timeout_smoke.py), which **requires** GNU timeout; it does not test Linux's missing-helper path.
+- A different open issue, [Windows cold native-asset / MSVC helper](20261014-windows-cold-native-compiler-helper.md), covers the unmodified-MSVC consumer hang. A green Windows job using its documented disposable-runner workaround must not be presented as resolving that issue.
 
-That fallback is not evidence of bounded native cancellation on Windows or a
-standard macOS installation without GNU `timeout`. This is a source-level gap;
-no fresh platform reproduction is claimed by this task.
+## Goal and constraints
 
-Provide bounded owned-process-tree cancellation for the CLI on Windows and
-**Apple Silicon / arm64 macOS only**. Intel macOS is excluded. Keep Linux/GNU
-`timeout` behavior and unrelated workers/processes intact.
+1. Ensure that when GNU timeout is missing or its probe fails on Linux, mutation check/test and pristine baseline either use **bounded, owned-tree** cancellation or fail explicitly *before* launching an unowned process. Do not silently kill only the immediate `moon` PID.
+2. The supervisor/adapter must own descendants from process creation and terminate/reap them before removing a temporary workspace. Preserve other concurrent jobs and unrelated user processes.
+3. Preserve current GNU-timeout behavior, timeout vs ordinary failure classification, `--target`, `--jobs`, isolation, `--iterate`, source-tree safety, and error diagnostics.
+4. Leave the existing Darwin supervisor and Windows Job Object behavior intact. Do not expand the scope to Intel macOS or to the separate Windows cold-compiler helper fix.
 
-## Dependencies and implementation boundary
+## Acceptance evidence required
 
-- Reconcile current `runner.mbt`, subprocess-library/toolchain behavior and the
-  target host before selecting an OS adapter.
-- Preserve baseline/mutant classification, target forwarding, deterministic
-  parallel reports and temporary-workspace isolation.
-- Cancel and reap owned descendants before restoring/deleting a workspace.
-  If safe cleanup cannot be established, fail explicitly instead of claiming
-  completed cleanup or reusing a possibly active workspace.
-- Verify the missing/unsupported `timeout` probe path as well as cancellation.
-- The source-exact Python companion has separate POSIX process-group
-  assumptions; porting that entire companion is outside this CLI packet.
+- [ ] Reproduce a Linux environment with both `timeout` and `gtimeout` absent from the CLI's effective PATH. Record Linux distribution/arch, toolchain version, release/HEAD SHA, exact probe command, and fixture invocation.
+- [ ] A deterministic nested compiler/test fixture launches a tokenized persistent child. Trigger a mutant TIMEOUT, and confirm the root and **every owned descendant** have terminated before workspace cleanup, with no further file writes; a warm build must not hide the timeout setup.
+- [ ] Exercise a baseline timeout separately. Verify that a failed baseline cannot produce a valid mutation report or success status.
+- [ ] Exercise explicit cancellation/interruption and multiple parallel workers without killing another worker or mutating the original working tree.
+- [ ] Exercise probe failure/unsupported helper and cleanup failure; return a specific diagnostic and non-success exit instead of assuming cleanup succeeded.
+- [ ] Repeat the existing Linux GNU-timeout test, Apple Silicon Darwin no-helper descendant test, and Windows job/timeout/parallel regressions. Each must have completed/success results at the final candidate HEAD.
+- [ ] Record logs, check results, reproduction outcome, and any platform limitation. Do not claim all-platform qualification from source inspection or build-only success.
 
-## Acceptance
+## Implementation boundary
 
-- [ ] Reproduce the fallback with GNU `timeout` absent on each declared host,
-  recording source/toolchain/library/OS and arm64 architecture for macOS.
-- [ ] A deterministic fixture starts a hanging compiler/test descendant.
-  Expiry is classified TIMEOUT; the complete owned tree is gone before workspace
-  cleanup, with no lingering process or file writer.
-- [ ] Cover baseline and mutant timeouts, repeated runs and multiple workers.
-  A timed-out worker cannot terminate another worker or the original project.
-- [ ] Successful commands and ordinary test failures preserve existing results;
-  probe/setup/cleanup failures produce actionable diagnostics.
-- [ ] Existing Linux/GNU-`timeout` and target/parallel/isolation regressions pass.
-- [ ] Retain final-source process/cleanup evidence separately for Windows and
-  Apple Silicon macOS. Build-only success is not runtime qualification.
+Compare a Linux native process-group supervisor against explicit fail-fast when no verified group supervisor is available. Choose based on current MoonBit process API and OS capabilities, not by assuming `@process.hard_cancel()` controls descendants. Add only the minimal Linux adapter/fixture needed; preserve the Darwin/Windows paths.
 
-This records a bounded follow-up, not an OS support claim or a request to start
-new Windows implementation work immediately.
+Keep the fixture deterministic, bounded, and safe to run in disposable CI. Do not use `killall`, process-name sweeps, shared workspace deletion, or intrusive changes to host tools. The existing contributor Python harness may run the regression; porting it to MoonBit is a separate issue.
+
+## Verification status for this docs change
+
+- GitHub source and existing CI were inspected; a Linux no-helper repro, new regression suite and platform rerun were **not executed** as part of this documentation change.
+- This issue describes remaining work, not a newly implemented fix or an existing Windows/macOS regression.
+
+## History
+
+- 2026-10-07: original draft described Windows/Apple Silicon process-tree cleanup before the later platform implementations.
+- 2026-10-16: reconciled with current Darwin supervisor, Windows Job Object and CI. Narrowed the outstanding source-level risk to the Linux path without GNU timeout.

@@ -1,0 +1,88 @@
+# Changelog
+
+## Unreleased
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Deprecated
+
+### Removed
+
+### Security
+
+### Migration
+
+## 0.4.7
+
+### Fixed
+
+- Resolve `prettyprinter@0.4.11` so Mooncakes CLI installation works with Moon 0.1.20261012, which rejects legacy `moon.mod.json` dependencies.
+- Update source formatting and the prior-report test's JSON conversion for the current MoonBit toolchain and warning-free native checks.
+
+## 0.4.6
+
+### Fixed
+
+- On macOS without GNU coreutils, supervise `moon` in a process group and terminate same-group descendants on timeout or cancellation instead of leaving compiler/test processes running.
+
+## 0.4.5
+
+### Fixed
+
+- Give the bounded verification companion the same Windows process-tree timeout and cancellation ownership: launch suspended, assign a kill-on-close Job Object before resume, and wait for owned descendants to exit.
+
+## 0.4.4
+
+### Fixed
+
+- Run Windows `moon.exe` commands in a scoped Job Object and terminate/wait for owned descendants on timeout or cancellation; surface cleanup errors.
+
+## 0.4.3 (candidate for review)
+
+### Improved
+
+- Recognize Homebrew's `gtimeout` for process-group cancellation when it is installed.
+
+### Fixed
+
+- Continue with direct-process cancellation when neither `timeout` nor `gtimeout` is executable, instead of aborting while probing for a helper. This lets native macOS runs proceed without GNU coreutils.
+- Classify GNU timeout's KILL expiry as `TIMEOUT` while preserving an ordinary child exit status of 137 as a command failure.
+
+### Packaging
+
+- Point the module metadata and GitHub install examples at the maintained `gpui-mbt/turtles.mbt` repository; the Mooncakes package remains `f4ah6o/turtles`.
+- Run native check, unit-test, and mutation-fixture coverage on Apple Silicon macOS, including the no-GNU-timeout runner path.
+- Verify that the Darwin release runner and packaged turtles executable are arm64 before uploading the artifact.
+
+## 0.4.2
+
+### Improved
+
+- Normalize module-relative paths before package ownership and target-plan lookups so Windows separators do not hide nested packages.
+- Exercise native Windows fixture mutation, parallel worker ordering, and target-aware filtering in CI.
+
+### Packaging
+
+- Publish and verify the `turtles-windows-x86_64.exe` native release asset.
+
+## 0.4.0 (candidate for review)
+
+### Added
+
+- Target-aware mutation selection via `--target`, using Moon's own test dry-run plan to identify source files active for the selected backend. Target-inactive mutants are reported separately and excluded from the score.
+- Opt-in survivor analysis with `--emit-properties`, `--pbt-witness`, and `--pbt-amplify` to suggest properties, search for differential QuickCheck witnesses, and rerun property tests with a larger budget.
+- An experimental, bounded source-exact MoonBit verification companion and deterministic PBT regression/remutation tooling for a small profile of helpers. This remains separate from the default mutation-testing command and score.
+
+### Improved
+
+- `--iterate` now rejects stale verdicts when any source, test, package manifest, or configuration fingerprint changes, and does not reuse outcomes across targets or Moon versions.
+- JSON reports remain schema 3 and now include target-inactive mutant details where applicable.
+
+### Packaging
+
+- Add `moonbitlang/moon_config@0.4.0` for Moon package configuration and target-plan support.
+- Keep the default `turtles` run unchanged; all new analyses are opt-in.

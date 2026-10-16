@@ -1,6 +1,6 @@
 ///|
 /// Keep in sync with `version` in the module's moon.mod; a test guards it.
-let turtles_version : String = "0.3.0"
+let turtles_version : String = "0.4.7"
 
 ///|
 fn print_help() -> Unit {
@@ -53,7 +53,7 @@ fn parse_args(args : Array[String]) -> Config raise {
   let mut emit_regressions = false
   let mut emit_properties = false
   let mut pbt_witness = false
-  let mut pbt_amplify : Int? = None
+  let mut pbt_amplify : Int32? = None
   let mut i = 1
   // Every iteration must consume at least one argument, so the loop can run
   // at most args.length() times; more steps means the cursor went backwards.
@@ -214,7 +214,7 @@ fn config_is_space(byte : Byte) -> Bool {
 }
 
 ///|
-fn config_skip_space_and_comments(bytes : Bytes, position : Ref[Int]) -> Unit {
+fn config_skip_space_and_comments(bytes : Bytes, position : Ref[Int32]) -> Unit {
   while true {
     while position.val < bytes.length() && config_is_space(bytes[position.val]) {
       position.val = position.val + 1
@@ -229,7 +229,7 @@ fn config_skip_space_and_comments(bytes : Bytes, position : Ref[Int]) -> Unit {
 }
 
 ///|
-fn config_error(bytes : Bytes, position : Int, message : String) -> String {
+fn config_error(bytes : Bytes, position : Int32, message : String) -> String {
   let mut line = 1
   let mut column = 1
   let mut i = 0
@@ -246,7 +246,11 @@ fn config_error(bytes : Bytes, position : Int, message : String) -> String {
 }
 
 ///|
-fn config_consume(bytes : Bytes, position : Ref[Int], expected : Byte) -> Bool {
+fn config_consume(
+  bytes : Bytes,
+  position : Ref[Int32],
+  expected : Byte,
+) -> Bool {
   if position.val < bytes.length() && bytes[position.val] == expected {
     position.val = position.val + 1
     true
@@ -258,7 +262,7 @@ fn config_consume(bytes : Bytes, position : Ref[Int], expected : Byte) -> Bool {
 ///|
 fn config_expect(
   bytes : Bytes,
-  position : Ref[Int],
+  position : Ref[Int32],
   expected : Byte,
 ) -> Unit raise {
   guard config_consume(bytes, position, expected) else {
@@ -269,7 +273,7 @@ fn config_expect(
 }
 
 ///|
-fn config_parse_key(bytes : Bytes, position : Ref[Int]) -> String raise {
+fn config_parse_key(bytes : Bytes, position : Ref[Int32]) -> String raise {
   let start = position.val
   while position.val < bytes.length() {
     let byte = bytes[position.val]
@@ -290,7 +294,7 @@ fn config_parse_key(bytes : Bytes, position : Ref[Int]) -> String raise {
 }
 
 ///|
-fn config_parse_string(bytes : Bytes, position : Ref[Int]) -> String raise {
+fn config_parse_string(bytes : Bytes, position : Ref[Int32]) -> String raise {
   config_expect(bytes, position, b'"')
   let output = @buffer.Buffer()
   // Each iteration consumes at least one byte, so a step count beyond the
@@ -338,7 +342,7 @@ fn config_parse_string(bytes : Bytes, position : Ref[Int]) -> String raise {
 ///|
 fn config_parse_string_array(
   bytes : Bytes,
-  position : Ref[Int],
+  position : Ref[Int32],
 ) -> Array[String] raise {
   config_expect(bytes, position, b'[')
   let values : Array[String] = []

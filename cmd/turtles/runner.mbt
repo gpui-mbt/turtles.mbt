@@ -16,12 +16,116 @@ fn moon_args(args : Array[String], target : String?) -> Array[String] {
 }
 
 ///|
+/// Darwin can use Homebrew's `gtimeout`, while GNU/Linux commonly provides
+/// `timeout`. Missing commands raise OSError, so probe failures simply leave
+/// the direct-process cancellation path available.
+#cfg(not(platform="windows"))
+async fn probe_group_timeout_from(
+  temp : String,
+  candidates : Array[String],
+) -> String? {
+  for executable in candidates {
+    let output = @process.redirect_to_file(temp + "/timeout-probe.log")
+    let exit_code = @async.with_timeout_opt(5000, () => {
+      @process.run(executable, ["--version"], stdout=output, stderr=output)
+    }) catch {
+      _ => None
+    }
+    if exit_code == Some(0) {
+      return Some(executable)
+    }
+  }
+  None
+}
+
+///|
+#cfg(not(platform="windows"))
+async fn probe_group_timeout(temp : String) -> String? {
+  // Prefer Homebrew's name so the Darwin CI path exercises the same helper
+  // users install there, even if a second coreutils alias is on PATH.
+  probe_group_timeout_from(temp, ["gtimeout", "timeout"])
+}
+
+///|
+#cfg(platform="windows")
+fn probe_group_timeout(_temp : String) -> String? {
+  // Windows has a different built-in command named `timeout`; never invoke it
+  // with GNU timeout's arguments. Windows commands use a scoped Job Object.
+  None
+}
+
+///|
+/// GNU timeout can report a KILL timeout as exit 137, which is also a valid
+/// child exit status. Process::wait_pid returns negative signal numbers when
+/// the wrapper itself is signalled; for positive 137, require GNU timeout's
+/// verbose diagnostic before treating it as a timeout.
+#cfg(not(platform="windows"))
+fn group_timeout_result(
+  exit_code : Int32?,
+  helper_sent_kill : Bool,
+) -> CommandResult {
+  match exit_code {
+    None | Some(124) => CommandTimeout
+    Some(0) => CommandSuccess
+    Some(code) if code < 0 => CommandTimeout
+    Some(137) if helper_sent_kill => CommandTimeout
+    Some(_) => CommandFailure
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
+fn group_timeout_sent_kill(log : String) -> Bool {
+  log.contains("sending signal KILL to command")
+}
+
+///|
+#cfg(not(platform="windows"))
+extern "C" fn turtles_darwin_supervisor_flag() -> String = "turtles_darwin_supervisor_flag"
+
+///|
+#cfg(not(platform="windows"))
+extern "C" fn turtles_darwin_supervisor_timeout_marker() -> String = "turtles_darwin_supervisor_timeout_marker"
+
+///|
+#cfg(not(platform="windows"))
+extern "C" fn turtles_darwin_supervisor_error_marker() -> String = "turtles_darwin_supervisor_error_marker"
+
+///|
+#cfg(not(platform="windows"))
+extern "C" fn turtles_is_darwin() -> Bool = "turtles_is_darwin"
+
+///|
+#cfg(not(platform="windows"))
+extern "C" fn turtles_darwin_executable_path() -> String = "turtles_darwin_executable_path"
+
+///|
+#cfg(not(platform="windows"))
+fn darwin_supervisor_result(
+  exit_code : Int32?,
+  log : String,
+) -> CommandResult raise {
+  if log.contains(turtles_darwin_supervisor_error_marker()) {
+    fail("Darwin process-group supervisor failed; see the moon output log")
+  }
+  if log.contains(turtles_darwin_supervisor_timeout_marker()) {
+    return CommandTimeout
+  }
+  match exit_code {
+    None => CommandTimeout
+    Some(0) => CommandSuccess
+    Some(_) => CommandFailure
+  }
+}
+
+///|
+#cfg(not(platform="windows"))
 async fn run_moon_command(
   root : String,
   args : Array[String],
-  timeout_ms : Int,
-  group_kill : Bool,
-  target? : String? = None,
+  timeout_ms : Int32,
+  timeout_command : String?,
+  target~ : String? = None,
 ) -> CommandResult {
   let command_args = moon_args(args, target)
   // Nested moon output must not reach our own stdout: when turtles runs
@@ -29,25 +133,67 @@ async fn run_moon_command(
   // protocol and corrupts result parsing. The log lives next to the
   // workspace so the copied tree stays pristine.
   let output = @process.redirect_to_file(root + "-moon-output.log")
-  if group_kill {
+  if timeout_command is Some(timeout_executable) {
     // GNU `timeout` runs moon in a fresh process group and signals the
     // GROUP on expiry — hard-killing only the moon pid orphans its
     // moonc/test-exe children, which then burn CPU until reaped (observed
     // in dogfood: orphaned test exes ran for hours). `with_timeout_opt`
     // remains as a belt around `timeout` itself.
     let secs = timeout_ms.to_double() / 1000.0
-    let wrapped = ["--signal=KILL", secs.to_string(), "moon"]
+    let wrapped = ["--verbose", "--signal=KILL", secs.to_string(), "moon"]
     for arg in command_args {
       wrapped.push(arg)
     }
     let exit_code = @async.with_timeout_opt(timeout_ms + 5000, () => {
-      @process.run("timeout", wrapped, cwd=root, stdout=output, stderr=output)
+      @process.run(
+        timeout_executable,
+        wrapped,
+        cwd=root,
+        stdout=output,
+        stderr=output,
+      )
     })
-    return match exit_code {
-      None | Some(124) => CommandTimeout
-      Some(0) => CommandSuccess
-      Some(_) => CommandFailure
+    let helper_sent_kill = if exit_code == Some(137) {
+      let log = @fs.read_file(root + "-moon-output.log").text() catch {
+        _ => ""
+      }
+      group_timeout_sent_kill(log)
+    } else {
+      false
     }
+    return group_timeout_result(exit_code, helper_sent_kill)
+  }
+  if turtles_is_darwin() {
+    // Without coreutils, re-exec this binary as a small Darwin supervisor.
+    // It owns a process group around moon so cancelling the helper cannot
+    // leave Moon's compiler or test executables running in the background.
+    let executable = turtles_darwin_executable_path()
+    guard executable != "" else {
+      fail(
+        "could not resolve turtles executable path for Darwin timeout supervisor",
+      )
+    }
+    let supervisor_args : Array[String] = [
+      turtles_darwin_supervisor_flag(),
+      timeout_ms.to_string(),
+      "--",
+      "moon",
+    ]
+    for arg in command_args {
+      supervisor_args.push(arg)
+    }
+    let exit_code = @async.with_timeout_opt(timeout_ms + 5000, () => {
+      @process.run(
+        executable,
+        supervisor_args,
+        cwd=root,
+        stdout=output,
+        stderr=output,
+        cancel_handler=@process.graceful_cancel(timeout=1000),
+      )
+    })
+    let log = @fs.read_file(root + "-moon-output.log").text() catch { _ => "" }
+    return darwin_supervisor_result(exit_code, log)
   }
   let exit_code = @async.with_timeout_opt(timeout_ms, () => {
     @process.run(
@@ -67,17 +213,277 @@ async fn run_moon_command(
 }
 
 ///|
+#cfg(platform="windows")
+#external
+priv type WindowsProcess
+
+///|
+#cfg(platform="windows")
+#borrow(command_line, working_directory, output_path)
+extern "C" fn windows_spawn_scoped_process(
+  command_line : String,
+  working_directory : String,
+  output_path : String,
+) -> WindowsProcess = "turtles_windows_spawn_scoped_process"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_process_is_null(process : WindowsProcess) -> Bool = "turtles_windows_process_is_null"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_process_is_exited(process : WindowsProcess) -> Int32 = "turtles_windows_process_is_exited"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_process_exit_code(process : WindowsProcess) -> Int32 = "turtles_windows_process_exit_code"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_job_active_processes(process : WindowsProcess) -> Int32 = "turtles_windows_job_active_processes"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_job_terminate(process : WindowsProcess) -> Int32 = "turtles_windows_job_terminate"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_job_members_exited(process : WindowsProcess) -> Int32 = "turtles_windows_job_members_exited"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_process_close(process : WindowsProcess) -> Int32 = "turtles_windows_process_close"
+
+///|
+#cfg(platform="windows")
+extern "C" fn windows_process_last_error() -> Int32 = "turtles_windows_process_last_error"
+
+///|
+#cfg(platform="windows")
+fn windows_error(operation : String) -> String {
+  "\{operation} failed (Win32 error \{windows_process_last_error()})"
+}
+
+///|
+#cfg(platform="windows")
+fn StringBuilder::write_windows_escaped_arg(
+  builder : StringBuilder,
+  arg : StringView,
+) -> Unit {
+  if arg is "" {
+    builder.write("\"\"")
+    return
+  }
+  let need_quote = for char in arg.code_units() {
+    if char is (' ' | '\t' | '"' | 0) {
+      break true
+    }
+  } nobreak {
+    false
+  }
+  if !need_quote {
+    builder.write_stringview(arg)
+    return
+  }
+  let mut segment_start = 0
+  let mut index = 0
+  let mut trailing_backslash = 0
+  fn flush(skip : Int32) {
+    if index > segment_start {
+      builder.write_stringview(arg[segment_start:index - trailing_backslash])
+      if trailing_backslash > 0 {
+        builder.write_string(String::make(trailing_backslash * 2, '\\'))
+      }
+    }
+    segment_start = index + skip
+    trailing_backslash = 0
+  }
+
+  builder.write_char('"')
+  while index < arg.length() {
+    match arg.code_unit_at(index) {
+      0 => break
+      '"' => {
+        flush(1)
+        builder.write("\\\"")
+      }
+      '\\' => trailing_backslash += 1
+      _ => trailing_backslash = 0
+    }
+    index += 1
+  }
+  flush(0)
+  builder.write_char('"')
+}
+
+///|
+#cfg(platform="windows")
+fn windows_moon_command_line(args : Array[String]) -> String {
+  let command_line = StringBuilder()
+  command_line.write_windows_escaped_arg("moon.exe")
+  for arg in args {
+    command_line..write_char(' ').write_windows_escaped_arg(arg)
+  }
+  command_line.to_string()
+}
+
+///|
+#cfg(platform="windows")
+async fn windows_wait_for_process_tree(process : WindowsProcess) -> Int32 {
+  let mut exit_code : Int32? = None
+  while true {
+    if exit_code is None {
+      let is_exited = windows_process_is_exited(process)
+      if is_exited < 0 {
+        fail(windows_error("checking moon.exe process status"))
+      }
+      if is_exited == 1 {
+        let code = windows_process_exit_code(process)
+        if windows_process_last_error() != 0 {
+          fail(windows_error("reading moon.exe exit status"))
+        }
+        exit_code = Some(code)
+      }
+    }
+    let active = windows_job_active_processes(process)
+    if active < 0 {
+      fail(windows_error("checking moon.exe job status"))
+    }
+    if exit_code is Some(code) && active == 0 {
+      return code
+    }
+    @async.sleep(25)
+  } nobreak {
+    fail("moon.exe process wait ended without an exit status")
+  }
+}
+
+///|
+#cfg(platform="windows")
+async fn windows_wait_for_empty_job(process : WindowsProcess) -> Int32 {
+  // Wait on retained handles for every verified job member. Job accounting
+  // can reach zero before Windows signals the corresponding process handles.
+  // Keep a finite poll budget so cleanup still reaches its close/error path.
+  let mut attempts = 400
+  while attempts > 0 {
+    let exited = windows_job_members_exited(process)
+    if exited < 0 {
+      return -1
+    }
+    if exited == 1 {
+      return 1
+    }
+    @async.sleep(25)
+    attempts = attempts - 1
+  } nobreak {
+    0
+  }
+}
+
+///|
+#cfg(platform="windows")
+async fn windows_cleanup_process(process : WindowsProcess) -> Unit {
+  let mut cleanup_error : String? = None
+  if windows_job_terminate(process) < 0 {
+    cleanup_error = Some(
+      windows_error("capturing and terminating the moon.exe job"),
+    )
+  }
+  if cleanup_error is None {
+    let empty = windows_wait_for_empty_job(process)
+    match empty {
+      1 => ()
+      0 =>
+        cleanup_error = Some(
+          "Windows process job still had members after ten seconds",
+        )
+      _ =>
+        cleanup_error = Some(
+          windows_error("waiting for the moon.exe job members"),
+        )
+    }
+  }
+  let close_status = windows_process_close(process)
+  if close_status < 0 && cleanup_error is None {
+    cleanup_error = Some(windows_error("closing the moon.exe job"))
+  }
+  if cleanup_error is Some(message) {
+    fail(message)
+  }
+}
+
+///|
+#cfg(platform="windows")
+async fn run_moon_command(
+  root : String,
+  args : Array[String],
+  timeout_ms : Int32,
+  _timeout_command : String?,
+  target~ : String? = None,
+) -> CommandResult {
+  let command_args = moon_args(args, target)
+  let process = windows_spawn_scoped_process(
+    windows_moon_command_line(command_args),
+    root,
+    root + "-moon-output.log",
+  )
+  if windows_process_is_null(process) {
+    fail(windows_error("starting moon.exe in a scoped Windows job"))
+  }
+  let wait_result = @async.handle_cancellation(() => {
+    @async.with_timeout_opt(timeout_ms, () => {
+      windows_wait_for_process_tree(process)
+    })
+  }) catch {
+    error => {
+      let message = "\{error}"
+      @async.protect_from_cancel() <| () => { windows_cleanup_process(process) }
+      fail("Windows moon.exe wait failed: \{message}")
+    }
+  }
+  match wait_result {
+    None => {
+      // Parent cancellation must clean the process job before it propagates.
+      @async.protect_from_cancel() <| () => { windows_cleanup_process(process) }
+      @async.sleep(0)
+      fail("Windows process cancellation completed without propagating")
+    }
+    Some(None) => {
+      @async.protect_from_cancel() <| () => { windows_cleanup_process(process) }
+      CommandTimeout
+    }
+    Some(Some(exit_code)) => {
+      let status = windows_process_close(process)
+      if status < 0 {
+        fail(windows_error("closing the moon.exe process job"))
+      }
+      if exit_code == 0 {
+        CommandSuccess
+      } else {
+        CommandFailure
+      }
+    }
+  }
+}
+
+///|
 async fn classify_mutant(
   root : String,
   mutation : Mutation,
-  check_timeout_ms : Int,
-  test_timeout_ms : Int,
+  check_timeout_ms : Int32,
+  test_timeout_ms : Int32,
   plan : TestPlan?,
-  group_kill : Bool,
-  target? : String? = None,
+  timeout_command : String?,
+  target~ : String? = None,
 ) -> (Outcome, Array[String]?, Array[Kill]?) {
   match
-    run_moon_command(root, ["check"], check_timeout_ms, group_kill, target~) {
+    run_moon_command(
+      root,
+      ["check"],
+      check_timeout_ms,
+      timeout_command,
+      target~,
+    ) {
     CommandFailure => return (Unviable, None, None)
     CommandTimeout => return (Timeout, None, None)
     CommandSuccess => ()
@@ -87,7 +493,8 @@ async fn classify_mutant(
     None => None
   }
   let args = mutant_test_args(packages)
-  match run_moon_command(root, args, test_timeout_ms, group_kill, target~) {
+  match
+    run_moon_command(root, args, test_timeout_ms, timeout_command, target~) {
     CommandSuccess => (Survived, packages, None)
     CommandFailure => (Killed, packages, last_test_failures(root))
     CommandTimeout => (Timeout, packages, None)
@@ -103,13 +510,13 @@ async fn classify_mutant(
 async fn validate_workspace(
   workspace : String,
   reference : String,
-  timeout_ms : Int,
-  group_kill : Bool,
-  target? : String? = None,
+  timeout_ms : Int32,
+  timeout_command : String?,
+  target~ : String? = None,
 ) -> (Int64, Int64) {
   let check_started = @async.now()
   match
-    run_moon_command(workspace, ["check"], timeout_ms, group_kill, target~) {
+    run_moon_command(workspace, ["check"], timeout_ms, timeout_command, target~) {
     CommandSuccess => ()
     CommandFailure =>
       fail(
@@ -123,7 +530,7 @@ async fn validate_workspace(
     workspace,
     reference,
     timeout_ms,
-    group_kill,
+    timeout_command,
     target~,
   )
   (check_ms, test_ms)
@@ -140,9 +547,9 @@ async fn validate_workspace(
 async fn baseline_test_run(
   workspace : String,
   reference : String,
-  timeout_ms : Int,
-  group_kill : Bool,
-  target? : String? = None,
+  timeout_ms : Int32,
+  timeout_command : String?,
+  target~ : String? = None,
 ) -> Int64 {
   let test_args = mutant_test_args(None)
   let manifest = snapshot_workspace(workspace)
@@ -151,7 +558,7 @@ async fn baseline_test_run(
     workspace,
     test_args,
     timeout_ms,
-    group_kill,
+    timeout_command,
     target~,
   )
   let first_ms = @async.now() - first_started
@@ -169,7 +576,7 @@ async fn baseline_test_run(
     workspace,
     test_args,
     timeout_ms,
-    group_kill,
+    timeout_command,
     target~,
   )
   let second_ms = @async.now() - second_started
@@ -242,11 +649,11 @@ fn abort_unstable_baseline(
 /// hub package that recompile can exceed the entire warm test baseline
 /// (observed: moonbitlang/core `internal/strconv` checks >10s).
 fn effective_timeouts(
-  timeout_ms : Int,
+  timeout_ms : Int32,
   timeout_multiplier : Double?,
   baseline_check_ms : Int64,
   baseline_test_ms : Int64,
-) -> (Int, Int) {
+) -> (Int32, Int32) {
   match timeout_multiplier {
     None => (timeout_ms, timeout_ms)
     Some(multiplier) => {
@@ -348,7 +755,7 @@ async fn run_mutation_pool(
   temp : String,
   reference : String,
   mutations : Array[Mutation],
-  jobs : Int,
+  jobs : Int32,
   reuse : Array[MutationResult?],
   classify : async (String, Mutation) -> (Outcome, Array[String]?, Array[Kill]?),
 ) -> Array[MutationResult] {
@@ -416,16 +823,16 @@ async fn run_mutation_pool(
 async fn run_mutations(
   root : String,
   mutations : Array[Mutation],
-  timeout_ms : Int,
+  timeout_ms : Int32,
   timeout_multiplier : Double?,
-  jobs : Int,
+  jobs : Int32,
   affected : Bool,
   reuse : Array[MutationResult?],
-  target? : String? = None,
-  emit_properties? : Bool = false,
-  pbt_witness? : Bool = false,
-  pbt_amplify? : Int? = None,
-  output_dir? : String = "",
+  target~ : String? = None,
+  emit_properties~ : Bool = false,
+  pbt_witness~ : Bool = false,
+  pbt_amplify~ : Int32? = None,
+  output_dir~ : String = "",
 ) -> (
   Int64,
   Int64,
@@ -516,19 +923,16 @@ async fn run_mutations(
     copy_tree(reference, reference, baseline)
     println("Baseline: moon check + moon test on pristine copy ...")
     let started = @async.now()
-    // Probe for GNU `timeout`: present everywhere on Linux coreutils; on
-    // systems without it we keep the single-pid hard-kill path (children
-    // of a killed moon may then be orphaned until they exit).
-    let probe_out = @process.redirect_to_file(temp + "/timeout-probe.log")
-    let group_kill = @async.with_timeout_opt(5000, () => {
-        @process.run("timeout", ["--version"], stdout=probe_out)
-      }) ==
-      Some(0)
+    // GNU coreutils uses `timeout` on Linux and `gtimeout` when installed
+    // with Homebrew on macOS. Missing executables raise OSError from
+    // @process.run, so the probe must treat that as an unavailable helper
+    // and leave the native single-pid cancellation path usable.
+    let timeout_command = probe_group_timeout(temp)
     let (baseline_check_ms, baseline_test_ms) = validate_workspace(
       baseline,
       reference,
       timeout_ms * 10,
-      group_kill,
+      timeout_command,
       target~,
     )
     let baseline_duration_ms = @async.now() - started
@@ -550,7 +954,7 @@ async fn run_mutations(
         check_timeout_ms,
         test_timeout_ms,
         plan,
-        group_kill,
+        timeout_command,
         target~,
       )
     }
@@ -579,7 +983,7 @@ async fn run_mutations(
                 factor,
                 check_timeout_ms,
                 test_timeout_ms,
-                group_kill,
+                timeout_command,
                 target~,
               )
             None => ()
@@ -591,7 +995,7 @@ async fn run_mutations(
               results,
               index,
               test_timeout_ms,
-              group_kill,
+              timeout_command,
               target~,
             )
           }
