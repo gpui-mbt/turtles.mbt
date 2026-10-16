@@ -208,3 +208,70 @@ jobs:
             echo "Unexpected remote tag state for $RELEASE_TAG: $tag_ref_state" >&2
             exit 1
           fi
+
+  publish-mooncakes:
+    if: github.event_name == 'push' && needs.prepare.outputs.release_tag != ''
+    needs: [prepare, publish]
+    concurrency:
+      group: turtles-mooncakes-${{ needs.prepare.outputs.release_tag }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hustcer/setup-moonbit@v1
+      - name: Validate registry package
+        run: |
+          moon update
+          moon fmt --check
+          moon check --target native --deny-warn
+          moon test --target native
+          moon package --list
+      - name: Publish Mooncakes version
+        env:
+          MOONCAKES_TOKEN: ${{ secrets.MOONCAKES_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version *= *"\(.*\)"/\1/p' moon.mod)"
+          test -n "$version"
+          curl -fsSL https://mooncakes.io/api/v0/modules/f4ah6o/turtles -o "$RUNNER_TEMP/mooncakes.json"
+          if jq -e --arg v "$version" '.versions[] | select(.version == $v and (.yanked | not))' "$RUNNER_TEMP/mooncakes.json" >/dev/null; then
+            echo "f4ah6o/turtles@$version is already published"
+            exit 0
+          fi
+          test -n "$MOONCAKES_TOKEN" || {
+            echo 'Missing repository secret MOONCAKES_TOKEN' >&2
+            exit 1
+          }
+          credentials="$HOME/.moon/credentials.json"
+          trap 'rm -f "$credentials"' EXIT
+          umask 077
+          if jq -e 'type == "object" and (.token | type == "string" and length > 0)' <<<"$MOONCAKES_TOKEN" >/dev/null 2>&1; then
+            printf '%s\n' "$MOONCAKES_TOKEN" > "$credentials"
+          else
+            jq -n '{token: env.MOONCAKES_TOKEN}' > "$credentials"
+          fi
+          moon publish
+      - name: Verify checkout-free registry install with Python blocked
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version *= *"\(.*\)"/\1/p' moon.mod)"
+          temp="$(mktemp -d)"
+          trap 'rm -rf "$temp"' EXIT
+          mkdir -p "$temp/consumer" "$temp/no-python"
+          for exe in python python3; do
+            printf '%s\n' '#!/bin/sh' 'echo "unexpected Python invocation" >&2' 'exit 97' > "$temp/no-python/$exe"
+            chmod +x "$temp/no-python/$exe"
+          done
+          cd "$temp/consumer"
+          export PATH="$temp/no-python:$PATH"
+          moon update
+          moon install "f4ah6o/turtles/cmd/turtles@$version" --bin "$temp/bin"
+          test "$("$temp/bin/turtles" --version)" = "turtles $version"
+          printf '%s\n' 'name = "smoke/registry_consumer"' 'version = "0.1.0"' 'preferred_target = "native"' > moon.mod
+          touch moon.pkg
+          printf '%s\n' 'pub fn plus(a : Int32, b : Int32) -> Int32 { a + b }' > plus.mbt
+          printf '%s\n' 'test "plus" { inspect(plus(1, 2), content="3") }' > plus_test.mbt
+          "$temp/bin/turtles" --dir . --timeout 60 --json "$temp/report.json"
+          jq -e --arg v "$version" '.schema == 3 and .turtles_version == $v and (.mutants | length) == 1 and .summary.killed == 1 and .summary.survived == 0 and .summary.timeout == 0 and .summary.unviable == 0' "$temp/report.json"

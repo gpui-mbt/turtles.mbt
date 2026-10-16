@@ -18,7 +18,7 @@ fn split_lines(bytes : Bytes) -> Array[String] raise {
 
 ///|
 /// 0-based index of the line containing byte `pos` (clamped in range).
-fn line_of_byte(bytes : Bytes, pos : Int) -> Int {
+fn line_of_byte(bytes : Bytes, pos : Int32) -> Int32 {
   let limit = if pos > bytes.length() { bytes.length() } else { pos }
   let mut line = 0
   for i = 0; i < limit; i = i + 1 {
@@ -33,7 +33,7 @@ fn line_of_byte(bytes : Bytes, pos : Int) -> Int {
 /// 0-based index of the line containing the byte at exclusive-end `pos` -
 /// i.e. the last changed byte. A changed newline still belongs to the line
 /// it terminates.
-fn line_of_end_byte(bytes : Bytes, pos : Int) -> Int {
+fn line_of_end_byte(bytes : Bytes, pos : Int32) -> Int32 {
   if pos <= 0 {
     return 0
   }

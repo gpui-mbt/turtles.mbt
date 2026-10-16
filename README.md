@@ -12,11 +12,15 @@ The supported way to install `turtles` is `moon install`, which builds the nativ
 
 ### Stable — Mooncakes
 
-The registry package is the default install path. The 0.4.6 package's pinned install command is:
+The registry package is the default install path. **No turtles repository clone and no Python interpreter are required** to install or run the CLI; `moon install` fetches the published Mooncakes module and builds the native executable. The MoonBit toolchain remains required at runtime because turtles invokes `moon check` and `moon test` for the project under test. The published 0.4.7 package's pinned install command is:
 
 ```sh
-moon install f4ah6o/turtles/cmd/turtles@0.4.6
+moon install f4ah6o/turtles/cmd/turtles@0.4.7
 ```
+
+The installed `turtles` executable does not run any of the repository's `scripts/*.py` files. Those scripts are for contributor CI, release verification, platform regressions, and an optional experimental proof companion, not for mutation testing users. `.mbtx` is useful for standalone MoonBit automation (including our self-E2E validator), but it is not needed to launch this native CLI. `moonx` runs published Wasm executables; `cmd/turtles` currently supports native only and uses native process-control stubs, so use `moon install` or the native release asset rather than `moonx`.
+
+Version 0.4.7 fixes the MoonBit 0.1.20261012 compatibility and obsolete dependency-manifest errors affecting 0.4.6, and pins `prettyprinter@0.4.11`. Both the Mooncakes package and [v0.4.7 native release assets](https://github.com/gpui-mbt/turtles.mbt/releases/tag/v0.4.7) are published. CI independently tests registry installation and checksum-verified native assets on Linux x86_64, macOS Apple Silicon, and Windows x86_64, from unrelated modules with Python commands blocked and without checking out turtles. Windows source-package installation also requires an MSVC build environment. Windows native-asset CI currently disables the optional MSVC `vctip.exe` helper in its disposable runner: a fresh, unmodified toolchain can leave the 0.4.7 CLI waiting after baseline tests pass. Prefer the Mooncakes install route; the remaining cold-start limitation is tracked in [this follow-up](issues/open/20261014-windows-cold-native-compiler-helper.md).
 
 ### Development — GitHub
 
@@ -27,7 +31,7 @@ moon install https://github.com/gpui-mbt/turtles.mbt.git cmd/turtles --branch ma
 Install from the matching source tag after it is created:
 
 ```sh
-moon install https://github.com/gpui-mbt/turtles.mbt.git cmd/turtles --tag v0.4.6
+moon install https://github.com/gpui-mbt/turtles.mbt.git cmd/turtles --tag v0.4.7
 ```
 
 ### From a local clone
@@ -39,7 +43,7 @@ moon install ./cmd/turtles
 ## First run in 30 seconds
 
 ```sh
-turtles --version          # turtles 0.4.6 for this source release
+turtles --version          # turtles 0.4.7 for this source release
 turtles --help
 
 cd path/to/your-moonbit-module
@@ -84,7 +88,7 @@ Note that `moon` itself already parallelizes a single build; `--jobs` paralleliz
 Install a pinned release and run turtles against your module:
 
 ```sh
-moon install f4ah6o/turtles/cmd/turtles@0.4.6
+moon install f4ah6o/turtles/cmd/turtles@0.4.7
 turtles --dir . --fail-under 80 --json turtles-report.json
 ```
 
@@ -144,7 +148,7 @@ Every run writes a schema-`3` report and per-survivor unified diffs to `<dir>/.t
 {
   "schema": 3,
   "module": "/abs/path",
-  "turtles_version": "0.4.6",
+  "turtles_version": "0.4.7",
   "moon_version": "moon 0.1.20260920 (914d7da 2026-09-20) ~/.moon/bin/moon",
   "target": "native",
   "inactive_mutants": 1,
@@ -282,7 +286,7 @@ JUnit reports, richer survivor context, and smarter default test selection are s
 ## Versioned native releases
 
 Edit the `version` field in `moon.mod` to the intended SemVer version
-(e.g., `0.4.5` to `0.4.6`) and merge that change into `main`.
+(e.g., `0.4.6` to `0.4.7`) and merge that change into `main`.
 The release workflow compares the previous and new **version values**, not
 just the file modification date. On a version increase it validates
 version consistency, builds four native platforms, then creates the
@@ -303,3 +307,9 @@ publishing stops and preserves it for manual repair. If tag lookup and the
 paginated release list disagree, publishing also stops for manual review.
 
 Update `cmd/turtles/config.mbt`'s `turtles_version` alongside `moon.mod`.
+
+After native publication succeeds, the workflow validates and publishes the
+same version to Mooncakes, then installs it from an unrelated directory with
+Python commands blocked and runs a mutation fixture. Configure repository
+secret `MOONCAKES_TOKEN` with a publish token or the JSON contents of
+`~/.moon/credentials.json`; the workflow fails explicitly if it is missing.

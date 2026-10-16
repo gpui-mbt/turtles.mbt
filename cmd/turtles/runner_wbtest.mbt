@@ -1,7 +1,10 @@
 ///|
 #cfg(all(target="native", not(platform="windows")))
 #borrow(argv)
-extern "C" fn turtles_darwin_supervise(timeout_ms : Int, argv : Bytes) -> Int = "turtles_darwin_supervise"
+extern "C" fn turtles_darwin_supervise(
+  timeout_ms : Int32,
+  argv : Bytes,
+) -> Int32 = "turtles_darwin_supervise"
 
 ///|
 #cfg(all(target="native", not(platform="windows")))

@@ -29,7 +29,7 @@ fn operator_specs() -> Array[OpSpec] {
 /// Parser locations use Unicode-scalar offsets in the default lexer mode.
 /// Mutation application, however, slices UTF-8 bytes. Build an explicit
 /// boundary table once so parser locations are never confused with bytes.
-fn utf8_width(byte : Byte) -> Int {
+fn utf8_width(byte : Byte) -> Int32 {
   let value = byte.to_int()
   if value < 0x80 {
     1
@@ -43,8 +43,8 @@ fn utf8_width(byte : Byte) -> Int {
 }
 
 ///|
-fn source_byte_boundaries(bytes : Bytes) -> Array[Int] {
-  let boundaries : Array[Int] = [0]
+fn source_byte_boundaries(bytes : Bytes) -> Array[Int32] {
+  let boundaries : Array[Int32] = [0]
   let mut byte_index = 0
   while byte_index < bytes.length() {
     let width = utf8_width(bytes[byte_index])
@@ -58,7 +58,10 @@ fn source_byte_boundaries(bytes : Bytes) -> Array[Int] {
 }
 
 ///|
-fn source_byte_offset(boundaries : Array[Int], scalar_offset : Int) -> Int {
+fn source_byte_offset(
+  boundaries : Array[Int32],
+  scalar_offset : Int32,
+) -> Int32 {
   if scalar_offset < 0 || scalar_offset >= boundaries.length() {
     panic()
   }
@@ -77,11 +80,11 @@ fn same_mutation_identity(left : Mutation, right : Mutation) -> Bool {
 struct AstCandidateVisitor {
   path : String
   bytes : Bytes
-  boundaries : Array[Int]
+  boundaries : Array[Int32]
   specs : Array[OpSpec]
   project_config : ProjectConfig
   /// impl start offsets (scalar) excluded by a turtles skip marker
-  skipped_starts : Map[Int, Bool]
+  skipped_starts : Map[Int32, Bool]
   /// out-param: receives one entry per skipped top-level block
   skipped_blocks : Array[SkippedBlock]?
   /// trait name -> method name -> (declared return type, is async):
@@ -98,10 +101,10 @@ fn AstCandidateVisitor::append_mutation(
   group : OperatorGroup,
   original : String,
   replacement : String,
-  start : Int,
-  end : Int,
-  line : Int,
-  column : Int,
+  start : Int32,
+  end : Int32,
+  line : Int32,
+  column : Int32,
 ) -> Unit {
   if original == replacement {
     return
@@ -133,10 +136,10 @@ fn AstCandidateVisitor::append_mutation(
 fn AstCandidateVisitor::record(
   self : AstCandidateVisitor,
   spec : OpSpec,
-  start_scalar : Int,
-  end_scalar : Int,
-  line : Int,
-  column : Int,
+  start_scalar : Int32,
+  end_scalar : Int32,
+  line : Int32,
+  column : Int32,
 ) -> Unit {
   if !self.project_config.operator_enabled(spec.group) {
     return
@@ -166,10 +169,10 @@ fn AstCandidateVisitor::record_range(
   self : AstCandidateVisitor,
   group : OperatorGroup,
   replacement : String,
-  start_scalar : Int,
-  end_scalar : Int,
-  line : Int,
-  column : Int,
+  start_scalar : Int32,
+  end_scalar : Int32,
+  line : Int32,
+  column : Int32,
 ) -> Unit {
   if !self.project_config.operator_enabled(group) {
     return
@@ -187,10 +190,10 @@ fn AstCandidateVisitor::record_range(
 fn AstCandidateVisitor::record_operator(
   self : AstCandidateVisitor,
   original : String,
-  start_scalar : Int,
-  end_scalar : Int,
-  line : Int,
-  column : Int,
+  start_scalar : Int32,
+  end_scalar : Int32,
+  line : Int32,
+  column : Int32,
 ) -> Unit {
   for spec in self.specs {
     if spec.original == original {
@@ -351,7 +354,7 @@ fn impl_visibility(impl_ : @syntax.Impl) -> MutantVisibility {
 
 ///|
 /// The byte span of a top-level block, for skip-marker region checks.
-fn impl_span(impl_ : @syntax.Impl) -> (Int, Int) {
+fn impl_span(impl_ : @syntax.Impl) -> (Int32, Int32) {
   let loc = match impl_ {
     TopExpr(loc~, ..) => loc
     TopTest(loc~, ..) => loc
@@ -371,7 +374,7 @@ fn impl_span(impl_ : @syntax.Impl) -> (Int, Int) {
 
 ///|
 /// The line a top-level block starts on, for `--list` skip reporting.
-fn impl_line(impl_ : @syntax.Impl) -> Int {
+fn impl_line(impl_ : @syntax.Impl) -> Int32 {
   let loc = match impl_ {
     TopExpr(loc~, ..) => loc
     TopTest(loc~, ..) => loc
@@ -435,8 +438,8 @@ fn is_skip_comment(content : String) -> Bool {
 ///|
 /// Scalar positions of `// turtles: skip` line comments. Comments are not
 /// part of the AST, so they are collected with the lexer in comment mode.
-fn skip_comment_positions(source : String) -> Array[Int] {
-  let positions : Array[Int] = []
+fn skip_comment_positions(source : String) -> Array[Int32] {
+  let positions : Array[Int32] = []
   let result = @lexer.tokens_from_string(source, comment=true)
   for entry in result.tokens {
     if entry.0 is @tokens.Token::COMMENT(comment) &&
@@ -483,8 +486,8 @@ fn collect_trait_methods(
 fn skipped_impl_starts(
   impls : Array[@syntax.Impl],
   source : String,
-) -> Map[Int, Bool] {
-  let skipped : Map[Int, Bool] = Map([])
+) -> Map[Int32, Bool] {
+  let skipped : Map[Int32, Bool] = Map([])
   for impl_ in impls {
     if impl_has_skip_attr(impl_) {
       skipped[impl_span(impl_).0] = true

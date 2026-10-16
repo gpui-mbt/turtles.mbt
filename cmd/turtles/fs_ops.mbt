@@ -170,7 +170,7 @@ async fn discover_mutations(
 /// workspace serves. A read-only file stays unwritable and a private file
 /// stays private.
 #cfg(not(platform="windows"))
-async fn observed_permission(path : String) -> Int {
+async fn observed_permission(path : String) -> Int32 {
   let read = @fs.can_read(path) catch { _ => false }
   let write = @fs.can_write(path) catch { _ => false }
   let execute = @fs.can_execute(path) catch { _ => false }
@@ -189,7 +189,7 @@ async fn observed_permission(path : String) -> Int {
 
 ///|
 #cfg(platform="windows")
-fn observed_permission(_path : String) -> Int {
+fn observed_permission(_path : String) -> Int32 {
   // NTFS access is controlled by ACLs, not POSIX mode bits. Treat modes as
   // unchanged and let the temporary workspace inherit its parent ACL.
   0
@@ -197,20 +197,20 @@ fn observed_permission(_path : String) -> Int {
 
 ///|
 #cfg(not(platform="windows"))
-async fn set_permission(path : String, permission : Int) -> Unit {
+async fn set_permission(path : String, permission : Int32) -> Unit {
   @fs.chmod(path, permission)
 }
 
 ///|
 #cfg(platform="windows")
-fn set_permission(_path : String, _permission : Int) -> Unit {
+fn set_permission(_path : String, _permission : Int32) -> Unit {
   // @fs.chmod is not supported by the Windows filesystem adapter.
   ()
 }
 
 ///|
 #cfg(not(platform="windows"))
-async fn try_set_permission(path : String, permission : Int) -> Bool {
+async fn try_set_permission(path : String, permission : Int32) -> Bool {
   @fs.chmod(path, permission) catch {
     _ => return false
   }
@@ -219,7 +219,7 @@ async fn try_set_permission(path : String, permission : Int) -> Bool {
 
 ///|
 #cfg(platform="windows")
-fn try_set_permission(_path : String, _permission : Int) -> Bool {
+fn try_set_permission(_path : String, _permission : Int32) -> Bool {
   true
 }
 
@@ -327,7 +327,7 @@ async fn force_rmdir(path : String) -> Unit {
 /// observed permission — a mode-only change is still a dirty file.
 struct ManifestFile {
   hash : String
-  perm : Int
+  perm : Int32
 }
 
 ///|
@@ -339,7 +339,7 @@ struct WorkspaceManifest {
   files : Map[String, ManifestFile]
   /// relative dir path -> observed permission (a mode-only chmod is a
   /// dirty dir, restored after contents just like copy_tree does)
-  dirs : Map[String, Int]
+  dirs : Map[String, Int32]
   links : Map[String, Bool]
 }
 
