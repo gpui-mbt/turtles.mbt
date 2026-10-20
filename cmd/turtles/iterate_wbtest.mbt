@@ -292,6 +292,51 @@ async test "iterate round-trips killed_by attribution from a prior report" {
 }
 
 ///|
+async test "iterate reloads boundary rows without borrowing comparison verdicts" {
+  let temp = @fs.tmpdir(prefix="turtles-iterate-boundary")
+  @async.with_task_group(group => {
+    group.add_defer(() => @fs.rmdir(temp, recursive=true))
+    // Both rows sit on the same `<` span; only the group and replacement
+    // tell them apart, which is exactly what the identity tuple covers.
+    let comparison_row = "{\"path\":\"a.mbt\",\"offset\":0,\"end\":1,\"group\":\"comparison\",\"original\":\"<\",\"replacement\":\">\",\"outcome\":\"KILLED\",\"line\":1,\"column\":1}"
+    let boundary_row = "{\"path\":\"a.mbt\",\"offset\":0,\"end\":1,\"group\":\"boundary\",\"original\":\"<\",\"replacement\":\"<=\",\"outcome\":\"KILLED\",\"line\":1,\"column\":1}"
+    let report = "{\"schema\":3,\"turtles_version\":\"\{turtles_version}\",\"moon_version\":\"moon x\",\"files\":{\"a.mbt\":\"hash-a\"},\"mutants\":[\{comparison_row},\{boundary_row}]}"
+    @fs.write_file(path_join(temp, "report.json"), report)
+    guard load_prior_report(path_join(temp, "report.json")) is Some(prior) else {
+      fail("expected prior report to load")
+    }
+    let current : Map[String, String] = Map([])
+    current["a.mbt"] = "hash-a"
+    let comparison = {
+      ..mk_mutation("a.mbt", 0, 1, "<", ">"),
+      group: Comparison,
+    }
+    let boundary = { ..mk_mutation("a.mbt", 0, 1, "<", "<="), group: Boundary, }
+    assert_true(
+      prior.mutants.get(mutation_identity(comparison))
+      is Some((_, Killed, _, _)),
+    )
+    assert_true(
+      prior.mutants.get(mutation_identity(boundary)) is Some((_, Killed, _, _)),
+    )
+    assert_true(
+      prior_reusable_outcome(prior, boundary, current, Some("moon x"))
+      is Some((Killed, None, _)),
+    )
+    // A boundary mutation the prior run never classified stays fresh.
+    let unrecorded = {
+      ..mk_mutation("a.mbt", 0, 1, "<", "<="),
+      start: 5,
+      end: 6,
+      group: Boundary,
+    }
+    assert_true(
+      prior_reusable_outcome(prior, unrecorded, current, Some("moon x")) is None,
+    )
+  })
+}
+
+///|
 test "mutation_id is a stable m- prefixed hex digest" {
   let id = mutation_id(mk_mutation("a.mbt", 0, 1, "+", "-"))
   assert_true(id.has_prefix("m-"))

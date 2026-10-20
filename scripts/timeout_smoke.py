@@ -24,10 +24,15 @@ def write_fixture(module: Path) -> None:
     (module / "moon.pkg").write_text("", encoding="utf-8")
     (module / "loop.mbt").write_text(
         """///|
+pub fn finite_value() -> Int {
+  1 + 2
+}
+
+///|
 pub fn loop_value() -> Int {
   let mut count = 0
   while false {
-    count = count + 1
+    count = 1
   }
   count
 }
@@ -35,7 +40,8 @@ pub fn loop_value() -> Int {
         encoding="utf-8",
     )
     (module / "loop_test.mbt").write_text(
-        '///|\ntest "loop_value" { inspect(loop_value(), content="0") }\n',
+        '///|\ntest "loop_value" { inspect(loop_value(), content="0") }\n'
+        '///|\ntest "finite_value" { inspect(finite_value(), content="3") }\n',
         encoding="utf-8",
     )
 
@@ -71,10 +77,12 @@ def main() -> None:
                 "--",
                 "--dir",
                 str(module),
+                "--operators",
+                "literal,arithmetic",
                 "--timeout",
-                "3",
+                "15",
                 "--fail-under",
-                "1",
+                "100",
                 "--iterate",
                 "--pbt-amplify",
                 "2",
@@ -106,12 +114,19 @@ def main() -> None:
             ]
             if (
                 summary["timeout"] != 1
-                or summary["killed"] != 0
-                or summary["score"] != 0
+                or summary["killed"] != 1
+                or summary["survived"] != 0
+                or summary["unviable"] != 0
+                or summary["score"] != 50
             ):
                 raise AssertionError(f"unexpected timeout summary: {summary}")
+            finite = [m for m in report["mutants"] if m["original"] == "+"]
+            if len(report["mutants"]) != 2 or len(finite) != 1:
+                raise AssertionError(f"unexpected candidates: {report['mutants']}")
+            if finite[0]["replacement"] != "-" or finite[0]["outcome"] != "KILLED":
+                raise AssertionError(f"finite control was not killed: {finite}")
             if (
-                summary["reused"] != 0
+                summary["reused"] != attempt - 1
                 or len(timeout_mutants) != 1
                 or timeout_mutants[0]["original"] != "false"
                 or timeout_mutants[0]["replacement"] != "true"
@@ -121,7 +136,7 @@ def main() -> None:
                 )
 
         print(
-            "GNU timeout smoke passed: timeout counted, fail-under rejected, "
+            "GNU timeout smoke passed: finite control KILLED, timeout counted, fail-under rejected, "
             f"and TIMEOUT was rechecked on iterate (helper: {helper})."
         )
 

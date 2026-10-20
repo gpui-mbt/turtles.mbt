@@ -1,0 +1,218 @@
+///|
+/// Validates the report produced by
+/// `turtles --dir fixtures/boundary --operators boundary`.
+///
+/// The fixture pins the observable contract of the opt-in boundary group:
+/// only the four equality-only comparison mutants are generated, they carry
+/// the `boundary` group, `< -> <=` and `> -> >=` survive because the tests
+/// never check the threshold, and `<= -> <` / `>= -> >` are killed because
+/// they do. A run that generated comparison mutants instead, dropped a row,
+/// or misclassified one fails here.
+import {
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/async@0.22.4",
+  "moonbitlang/async@0.22.4/fs",
+}
+
+///|
+/// The four boundary edits, paired with the verdict the fixture's tests must
+/// produce for each of them.
+fn boundary_expected() -> Array[((String, String), String)] {
+  [
+    (("<", "<="), "SURVIVED"),
+    (("<=", "<"), "KILLED"),
+    ((">", ">="), "SURVIVED"),
+    ((">=", ">"), "KILLED"),
+  ]
+}
+
+///|
+fn number_field(fields : Map[String, Json], name : String) -> Int32? {
+  match fields.get(name) {
+    Some(Number(value, ..)) => Some(value.to_int())
+    _ => None
+  }
+}
+
+///|
+fn string_field(fields : Map[String, Json], name : String) -> String? {
+  match fields.get(name) {
+    Some(String(value)) => Some(value)
+    _ => None
+  }
+}
+
+///|
+fn array_field(fields : Map[String, Json], name : String) -> Array[Json]? {
+  match fields.get(name) {
+    Some(Array(values)) => Some(values)
+    _ => None
+  }
+}
+
+///|
+/// True when `json` is one fixture mutant row of the expected edit. The byte
+/// span must cover exactly the operator text, so a row that widened to the
+/// surrounding expression is rejected.
+fn valid_boundary_row(
+  json : Json,
+  edit : (String, String),
+  outcome : String,
+) -> Bool {
+  let (original, replacement) = edit
+  guard json is Object(fields) else { return false }
+  if string_field(fields, "path") != Some("comparisons.mbt") {
+    return false
+  }
+  if string_field(fields, "group") != Some("boundary") {
+    return false
+  }
+  if string_field(fields, "original") != Some(original) {
+    return false
+  }
+  if string_field(fields, "replacement") != Some(replacement) {
+    return false
+  }
+  if string_field(fields, "outcome") != Some(outcome) {
+    return false
+  }
+  guard number_field(fields, "offset") is Some(offset) &&
+    number_field(fields, "end") is Some(end_offset) else {
+    return false
+  }
+  end_offset - offset == original.length()
+}
+
+///|
+fn valid_boundary_report(report : Json) -> Bool {
+  guard report is Object(fields) else { return false }
+  if number_field(fields, "schema") != Some(3) {
+    return false
+  }
+  guard array_field(fields, "mutants") is Some(mutants) else { return false }
+  let expected = boundary_expected()
+  if mutants.length() != expected.length() {
+    return false
+  }
+  for i = 0; i < expected.length(); i = i + 1 {
+    let (edit, outcome) = expected[i]
+    if !valid_boundary_row(mutants[i], edit, outcome) {
+      return false
+    }
+  }
+  guard fields.get("summary") is Some(Object(summary)) else { return false }
+  number_field(summary, "killed") == Some(2) &&
+  number_field(summary, "survived") == Some(2) &&
+  number_field(summary, "timeout") == Some(0) &&
+  number_field(summary, "unviable") == Some(0) &&
+  number_field(summary, "score") == Some(50)
+}
+
+///|
+fn boundary_row(
+  original : String,
+  replacement : String,
+  group : String,
+  outcome : String,
+) -> String {
+  "{\"path\":\"comparisons.mbt\",\"group\":\"\{group}\",\"original\":\"\{original}\",\"replacement\":\"\{replacement}\",\"outcome\":\"\{outcome}\",\"offset\":0,\"end\":\{original.length()}}"
+}
+
+///|
+fn boundary_report(
+  rows : Array[String],
+  killed : Int32,
+  survived : Int32,
+) -> String {
+  let json_rows = StringBuilder()
+  for i = 0; i < rows.length(); i = i + 1 {
+    if i > 0 {
+      json_rows.write_string(",")
+    }
+    json_rows.write_string(rows[i])
+  }
+  "{\"schema\":3,\"mutants\":[\{json_rows}],\"summary\":{\"killed\":\{killed},\"survived\":\{survived},\"timeout\":0,\"unviable\":0,\"score\":50}}"
+}
+
+///|
+/// The exact report the CLI writes for fixtures/boundary, trimmed to the
+/// fields this validator reads.
+fn valid_report_text() -> String {
+  let rows = [
+    boundary_row("<", "<=", "boundary", "SURVIVED"),
+    boundary_row("<=", "<", "boundary", "KILLED"),
+    boundary_row(">", ">=", "boundary", "SURVIVED"),
+    boundary_row(">=", ">", "boundary", "KILLED"),
+  ]
+  boundary_report(rows, 2, 2)
+}
+
+///|
+test "accepts the four-row boundary fixture report" {
+  assert_true(valid_boundary_report(@json.parse(valid_report_text())))
+}
+
+///|
+test "rejects a run that generated comparison mutants instead" {
+  let rows = [
+    boundary_row("<", ">", "comparison", "KILLED"),
+    boundary_row("<=", ">", "comparison", "KILLED"),
+    boundary_row(">", "<", "comparison", "KILLED"),
+    boundary_row(">=", "<", "comparison", "KILLED"),
+  ]
+  assert_true(!valid_boundary_report(@json.parse(boundary_report(rows, 4, 0))))
+}
+
+///|
+test "rejects a missing boundary edit and a swapped verdict" {
+  let dropped = [
+    boundary_row("<", "<=", "boundary", "SURVIVED"),
+    boundary_row("<=", "<", "boundary", "KILLED"),
+    boundary_row(">", ">=", "boundary", "SURVIVED"),
+  ]
+  assert_true(
+    !valid_boundary_report(@json.parse(boundary_report(dropped, 2, 1))),
+  )
+  let swapped = [
+    boundary_row("<", "<=", "boundary", "KILLED"),
+    boundary_row("<=", "<", "boundary", "KILLED"),
+    boundary_row(">", ">=", "boundary", "SURVIVED"),
+    boundary_row(">=", ">", "boundary", "KILLED"),
+  ]
+  assert_true(
+    !valid_boundary_report(@json.parse(boundary_report(swapped, 3, 1))),
+  )
+}
+
+///|
+test "rejects a widened byte span, a foreign path, and a broken summary" {
+  let widened = valid_report_text().replace(
+    old="\"replacement\":\"<=\",\"outcome\":\"SURVIVED\",\"offset\":0,\"end\":1",
+    new="\"replacement\":\"<=\",\"outcome\":\"SURVIVED\",\"offset\":0,\"end\":2",
+  )
+  assert_true(!valid_boundary_report(@json.parse(widened)))
+  let foreign = valid_report_text().replace(
+    old="\"comparisons.mbt\"",
+    new="\"other.mbt\"",
+  )
+  assert_true(!valid_boundary_report(@json.parse(foreign)))
+  let wrong_score = valid_report_text().replace(
+    old="\"score\":50",
+    new="\"score\":100",
+  )
+  assert_true(!valid_boundary_report(@json.parse(wrong_score)))
+  assert_true(!valid_boundary_report(@json.parse("{}")))
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() == 2 else {
+    fail("usage: moon run scripts/verify-boundary.mbtx -- <report.json>")
+  }
+  let contents = @fs.read_file(args[1]).text()
+  guard valid_boundary_report(@json.parse(contents)) else {
+    fail("unexpected boundary fixture report at \{args[1]}")
+  }
+}

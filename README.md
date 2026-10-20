@@ -18,7 +18,7 @@ The registry package is the default install path. **No turtles repository clone 
 moon install f4ah6o/turtles/cmd/turtles@0.4.7
 ```
 
-The installed `turtles` executable does not run any of the repository's `scripts/*.py` files. Those scripts are for contributor CI, release verification, platform regressions, and an optional experimental proof companion, not for mutation testing users. `.mbtx` is useful for standalone MoonBit automation (including our self-E2E validator), but it is not needed to launch this native CLI. `moonx` runs published Wasm executables; `cmd/turtles` currently supports native only and uses native process-control stubs, so use `moon install` or the native release asset rather than `moonx`.
+The installed `turtles` executable does not run any of the repository's `scripts/*.py` files. Those scripts are for contributor CI, release verification, platform regressions, and an optional experimental proof companion, not for mutation testing users. `.mbtx` is useful for standalone MoonBit automation (including our self-E2E report validators), but it is not needed to launch this native CLI. `moonx` runs published Wasm executables; `cmd/turtles` currently supports native only and uses native process-control stubs, so use `moon install` or the native release asset rather than `moonx`.
 
 Version 0.4.7 fixes the MoonBit 0.1.20261012 compatibility and obsolete dependency-manifest errors affecting 0.4.6, and pins `prettyprinter@0.4.11`. Both the Mooncakes package and [v0.4.7 native release assets](https://github.com/gpui-mbt/turtles.mbt/releases/tag/v0.4.7) are published. CI independently tests registry installation and checksum-verified native assets on Linux x86_64, macOS Apple Silicon, and Windows x86_64, from unrelated modules with Python commands blocked and without checking out turtles. Windows source-package installation also requires an MSVC build environment. Windows native-asset CI currently disables the optional MSVC `vctip.exe` helper in its disposable runner: a fresh, unmodified toolchain can leave the 0.4.7 CLI waiting after baseline tests pass. Prefer the Mooncakes install route; the remaining cold-start limitation is tracked in [this follow-up](issues/open/20261014-windows-cold-native-compiler-helper.md).
 
@@ -69,6 +69,7 @@ turtles --dir . --emit-properties  # write property-test skeletons for survivors
 turtles --dir . --pbt-witness      # differential QuickCheck witness for survivors
 turtles --dir . --pbt-amplify 4    # re-run survivor properties with 4x budget
 turtles --dir . --timeout-multiplier 3   # per-phase timeout = 3x the measured baseline (min 10s)
+turtles --dir . --operators boundary      # opt in to equality-only comparison mutants
 ```
 
 ### Parallel execution
@@ -125,7 +126,10 @@ Per mutant, turtles reports `path:line:column`, `original -> replacement`, and i
 - arithmetic: `+ ↔ -`, `* ↔ /`, unary `-x → +x`
 - boolean literals: `true ↔ false`
 - conditions: whole `if` conditions → `true` or `false`
+- boundaries (opt-in `boundary` group): `< → <=`, `> → >=`, `<= → <`, `>= → >` — mutants that only differ at the equality point, so a test suite that checks just below and just above a threshold misses them
 - bodies (opt-in `body` group): a whole function body → a trivial literal of the declared return type (`0`/`1`/`-1` for signed ints, `0`/`1` for unsigned, `true`/`false` for `Bool`, `0.0`/`1.0` for floats, `""`/`"xyzzy"` for `String`, `()` for `Unit` or omitted annotations, `None` for `T?`/`Option[T]`, `[]` for `Array`/`FixedArray`, `{}` for `Map`)
+
+Enabling `comparison` and `boundary` together generates both edits at each comparison: the inversion first, then the boundary change. Each carries its own group in the report, so the two are never conflated.
 
 Outcome classification:
 
@@ -202,8 +206,9 @@ operators = ["comparison", "boolean", "arithmetic", "literal", "condition"]
 
 - `include`: optional path substrings; when non-empty, at least one must match the normalized relative source path.
 - `exclude`: optional path substrings; matching sources are skipped.
-- `operators`: optional operator groups. Supported groups are `comparison`, `boolean`, `arithmetic`, `literal`, `condition` (whole-`if`-condition replacement), and `body` (function-body replacement). `boolean` covers only logical `&&`/`||`; selecting `condition` alone gives structural mutations without logical ones, and vice versa. `body` is never enabled implicitly — with no `operators` list every group *except* `body` runs.
-- CLI `--operators <LIST>` takes a comma-separated group list and replaces the `turtles.toml` list wholesale, e.g. `turtles --dir . --operators body,comparison`.
+- `operators`: optional operator groups. Supported groups are `comparison`, `boolean`, `arithmetic`, `literal`, `condition` (whole-`if`-condition replacement), `body` (function-body replacement), and `boundary` (comparison-boundary replacement). `boolean` covers only logical `&&`/`||`; selecting `condition` alone gives structural mutations without logical ones, and vice versa. `body` and `boundary` are never enabled implicitly — with no `operators` list `comparison`, `boolean`, `arithmetic`, `literal`, and `condition` run.
+- CLI `--operators <LIST>` takes a comma-separated group list and replaces the `turtles.toml` list wholesale, e.g. `turtles --dir . --operators body,comparison` or `turtles --dir . --operators comparison,boundary`.
+- `boundary` is spelled exactly `boundary` (no alias). Naming only it runs four mutants and no comparison inversions; naming it together with `comparison` runs both at each comparison.
 
 The `body` group skips functions it has no typed literal for — user-defined types, `Result`, tuples, type parameters — rather than generating UNVIABLE mutants, and it never touches `test` blocks, `async` functions, `extern`/FFI declarations, or bodies that are already a single trivial literal.
 
@@ -275,9 +280,13 @@ moon check --target native --deny-warn
 moon test --target native
 moon -C fixtures/basic test
 moon run cmd/turtles -- --dir fixtures/basic --timeout 30
+moon -C fixtures/boundary test
+moon run cmd/turtles -- --dir fixtures/boundary --operators boundary --timeout 60 \
+  --json /tmp/boundary-report.json || test $? -eq 1
+moon run scripts/verify-boundary.mbtx -- /tmp/boundary-report.json
 ```
 
-The real fixture E2E also validates schema-3 JSON report generation, deterministic ordering under `--jobs`, `--fail-under` exit codes, and target-aware selection on `fixtures/targets` (`--target native|js|all` for `--list` and full runs, including cross-target `--iterate` reuse refusal).
+The real fixture E2E also validates schema-3 JSON report generation, deterministic ordering under `--jobs`, `--fail-under` exit codes, and target-aware selection on `fixtures/targets` (`--target native|js|all` for `--list` and full runs, including cross-target `--iterate` reuse refusal). On `fixtures/boundary`, `scripts/verify-boundary.mbtx` checks that the `--operators boundary` run emits exactly the four equality-only mutants with the verdicts the fixture's tests dictate (two survivors, exit `1`); CI additionally asserts that the default run on the same fixture emits only comparison inversions.
 
 ## Planned follow-ups
 

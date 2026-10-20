@@ -23,7 +23,7 @@ fn print_help() -> Unit {
       #|      --timeout-multiplier <N>  Timeout = N x baseline (floor 10s)
       #|      --affected          Experimental: scope tests to affected packages
       #|      --operators <LIST>  Comma-separated operator groups (overrides
-      #|                        turtles.toml; body is opt-in only)
+      #|                        turtles.toml; body and boundary are opt-in)
       #|      --emit-regressions  Write regression-test templates for property kills
       #|      --emit-properties   Write property-test suggestions for survivors
       #|      --pbt-witness       Differential QuickCheck witness for survivors

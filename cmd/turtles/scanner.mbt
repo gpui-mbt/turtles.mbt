@@ -6,6 +6,9 @@ struct OpSpec {
 }
 
 ///|
+/// The mutation table. Ordering is observable: at one AST position, specs
+/// sharing an `original` are recorded in table order, which keeps existing
+/// comparison mutants ahead of the opt-in boundary ones. New groups append.
 fn operator_specs() -> Array[OpSpec] {
   [
     { group: Comparison, original: "==", replacement: "!=", },
@@ -22,6 +25,11 @@ fn operator_specs() -> Array[OpSpec] {
     { group: Arithmetic, original: "/", replacement: "*", },
     { group: Comparison, original: ">", replacement: "<", },
     { group: Comparison, original: "<", replacement: ">", },
+    // Boundary mutants only differ from the original at the equality point.
+    { group: Boundary, original: "<", replacement: "<=", },
+    { group: Boundary, original: ">", replacement: ">=", },
+    { group: Boundary, original: "<=", replacement: "<", },
+    { group: Boundary, original: ">=", replacement: ">", },
   ]
 }
 
@@ -187,6 +195,9 @@ fn AstCandidateVisitor::record_range(
 }
 
 ///|
+/// Record every enabled replacement for one operator spelling, in table
+/// order: comparison and boundary share `<`, `>`, `<=` and `>=`. A matching
+/// spec of a disabled group consumes nothing, so it must not end the search.
 fn AstCandidateVisitor::record_operator(
   self : AstCandidateVisitor,
   original : String,
@@ -198,7 +209,6 @@ fn AstCandidateVisitor::record_operator(
   for spec in self.specs {
     if spec.original == original {
       self.record(spec, start_scalar, end_scalar, line, column)
-      break
     }
   }
 }

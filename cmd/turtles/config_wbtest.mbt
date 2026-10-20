@@ -256,6 +256,23 @@ test "parse_args reads --operators as a comma-separated group list" {
 }
 
 ///|
+test "boundary is a single opt-in group name in CLI and TOML" {
+  inspect(operator_group_from_string("boundary") == Boundary, content="true")
+  let config = parse_args(["turtles", "--operators", "comparison,boundary"])
+  let groups = config.operators.unwrap()
+  inspect(groups.length(), content="2")
+  inspect(groups[0] == Comparison, content="true")
+  inspect(groups[1] == Boundary, content="true")
+  // No alias beyond the documented spelling: a misspelled group stays an
+  // error instead of silently selecting nothing.
+  assert_true(parse_args_fails(["turtles", "--operators", "boundaries"]))
+  assert_true(config_fails("operators = [\"boundaries\"]"))
+  let toml_config = parse_project_config("operators = [\"boundary\"]")
+  inspect(toml_config.operator_enabled(Boundary), content="true")
+  inspect(toml_config.operator_enabled(Comparison), content="false")
+}
+
+///|
 test "parse_args rejects bad input" {
   assert_true(parse_args_fails(["turtles", "--bogus"]))
   assert_true(parse_args_fails(["turtles", "x"]))

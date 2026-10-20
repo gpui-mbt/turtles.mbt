@@ -6,6 +6,7 @@ enum OperatorGroup {
   Literal
   Condition
   Body
+  Boundary
 } derive(Eq)
 
 ///|
@@ -17,9 +18,10 @@ fn operator_group_from_string(value : String) -> OperatorGroup raise {
     "literal" | "boolean-literal" | "boolean-literals" => Literal
     "condition" | "conditions" => Condition
     "body" | "bodies" => Body
+    "boundary" => Boundary
     other =>
       fail(
-        "unknown operator group \{other}; expected comparison, boolean, arithmetic, literal, condition, or body",
+        "unknown operator group \{other}; expected comparison, boolean, arithmetic, literal, condition, body, or boundary",
       )
   }
 }
@@ -33,6 +35,18 @@ fn operator_group_name(group : OperatorGroup) -> String {
     Literal => "literal"
     Condition => "condition"
     Body => "body"
+    Boundary => "boundary"
+  }
+}
+
+///|
+/// Groups enabled when neither `turtles.toml` nor `--operators` names a list.
+/// The match is exhaustive on purpose: a new group joins the defaults only by
+/// decision, never by falling through a leftover "not Body" test.
+fn operator_group_default_enabled(group : OperatorGroup) -> Bool {
+  match group {
+    Comparison | Boolean | Arithmetic | Literal | Condition => true
+    Body | Boundary => false
   }
 }
 
@@ -77,9 +91,7 @@ fn ProjectConfig::operator_enabled(
   group : OperatorGroup,
 ) -> Bool {
   match self.operators {
-    // `body` is opt-in: replacing whole function bodies is too aggressive a
-    // default, so an unset operator list means every group except Body.
-    None => group != Body
+    None => operator_group_default_enabled(group)
     Some(operators) => {
       for operator in operators {
         if operator == group {

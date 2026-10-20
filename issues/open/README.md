@@ -7,8 +7,9 @@
 - [Windows cold native-asset / MSVC helper](20261014-windows-cold-native-compiler-helper.md) — 改変していないMSVC環境での起動・process-lifetime不一致（P1）
 - [Python-free contributor maintenance](20261013-python-free-maintenance-scripts.md) — 開発・CI用スクリプト移植（P2/P3）
 
-4件の実装仕様（comparison boundary / diff-aware selection / persistent diagnostics /
-deterministic CI sharding）は [polished tasks](../polished/README.md) に整理済みです。
+3件の実装仕様（diff-aware selection / persistent diagnostics / deterministic CI sharding）は
+[polished tasks](../polished/README.md) に整理済みです。comparison boundaryは
+[closed](../closed/20261013-comparison-boundary-mutations.md) で実装・検証済みです。
 `polished` は実装済みや受入検証完了を意味しません。
 
 ## Workflow

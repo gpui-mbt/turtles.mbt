@@ -317,7 +317,15 @@ test "mutation identity is explicitly deduplicated" {
     current_visibility: Private,
     mutations: [],
   }
-  let plus = operator_specs()[8]
+  // Look the spec up by content so appending to the table cannot silently
+  // change which operator this test records twice.
+  let mut plus : OpSpec? = None
+  for spec in operator_specs() {
+    if spec.original == "+" && spec.replacement == "-" {
+      plus = Some(spec)
+    }
+  }
+  let plus = plus.unwrap()
   visitor.record(plus, 2, 3, 1, 3)
   visitor.record(plus, 2, 3, 1, 3)
   inspect(visitor.mutations.length(), content="1")
@@ -620,6 +628,167 @@ test "loose comments are not skip markers" {
 test "body mutants carry a distinct group for fingerprints" {
   inspect(operator_group_name(Body), content="body")
   inspect(operator_group_from_string("body") == Body, content="true")
+}
+
+///|
+fn operators_config(groups : Array[String]) -> ProjectConfig raise {
+  let entries = StringBuilder()
+  for i = 0; i < groups.length(); i = i + 1 {
+    if i > 0 {
+      entries.write_string(",")
+    }
+    entries.write_string("\"")
+    entries.write_string(groups[i])
+    entries.write_string("\"")
+  }
+  parse_project_config("operators = [\{entries}]")
+}
+
+///|
+/// Four comparisons, one per boundary form, one per function so the edit
+/// location is unambiguous.
+fn boundary_source() -> String {
+  (
+    #|fn below(x : Int) -> Bool { x < 10 }
+    #|fn at_most(x : Int) -> Bool { x <= 10 }
+    #|fn above(x : Int) -> Bool { x > 10 }
+    #|fn at_least(x : Int) -> Bool { x >= 10 }
+  )
+}
+
+///|
+test "boundary group produces exactly the four equality-only mutations" {
+  let mutations = scan_source(
+    "b.mbt",
+    boundary_source(),
+    operators_config(["boundary"]),
+  )
+  inspect(mutations.length(), content="4")
+  for mutation in mutations {
+    inspect(mutation.group == Boundary, content="true")
+  }
+  // One function per operator, so the boundary mutant of `<=` (`<=` -> `<`)
+  // is the only candidate in the second function.
+  let expected = [("<", "<="), ("<=", "<"), (">", ">="), (">=", ">")]
+  for i = 0; i < expected.length(); i = i + 1 {
+    let (original, replacement) = expected[i]
+    inspect(has_mutation(mutations, original, replacement), content="true")
+    // The edit replaces the complete operator text and nothing else, so
+    // the byte span always equals the operator's own length.
+    let mutation = mutations[i]
+    inspect(mutation.original, content=original)
+    inspect(mutation.replacement, content=replacement)
+    inspect(
+      mutation.end - mutation.start,
+      content="\{mutation.original.length()}",
+    )
+  }
+}
+
+///|
+test "the default configuration produces no boundary mutations" {
+  let mutations = scan_source(
+    "b.mbt",
+    boundary_source(),
+    default_project_config(),
+  )
+  inspect(mutations.length(), content="4")
+  for mutation in mutations {
+    inspect(mutation.group == Comparison, content="true")
+  }
+  let default_only = scan_source(
+    "b.mbt",
+    boundary_source(),
+    operators_config(["comparison"]),
+  )
+  inspect(default_only.length(), content="4")
+  assert_true(default_only.iter().all(m => m.group == Comparison))
+}
+
+///|
+test "comparison and boundary share a position in table order with distinct ids" {
+  let config = operators_config(["comparison", "boundary"])
+  let mutations = scan_source("b.mbt", boundary_source(), config)
+  inspect(mutations.length(), content="8")
+  // Discovery is per function in source order; within one position the
+  // comparison mutant is recorded before the boundary mutant.
+  let expected = [
+    ("<", ">", Comparison),
+    ("<", "<=", Boundary),
+    ("<=", ">", Comparison),
+    ("<=", "<", Boundary),
+    (">", "<", Comparison),
+    (">", ">=", Boundary),
+    (">=", "<", Comparison),
+    (">=", ">", Boundary),
+  ]
+  for i = 0; i < expected.length(); i = i + 1 {
+    let (original, replacement, group) = expected[i]
+    inspect(mutations[i].original, content=original)
+    inspect(mutations[i].replacement, content=replacement)
+    inspect(mutations[i].group == group, content="true")
+  }
+  // Group order on the command line never changes the generation order.
+  let reversed = scan_source(
+    "b.mbt",
+    boundary_source(),
+    operators_config(["boundary", "comparison"]),
+  )
+  inspect(reversed.length(), content="8")
+  for i = 0; i < mutations.length(); i = i + 1 {
+    inspect(mutation_id(reversed[i]), content=mutation_id(mutations[i]))
+  }
+  inspect(
+    mutation_id(mutations[0]) != mutation_id(mutations[1]),
+    content="true",
+  )
+}
+
+///|
+test "boundary mutants edit the exact byte span in UTF-8 CRLF source" {
+  let source =
+    #|// 境界値の比較: 10 以下と 10 以上
+    #|fn at_most(x : Int) -> Bool { x < 10 }
+    #|
+  let source = source.replace_all(old="\n", new="\r\n")
+  let config = operators_config(["boundary"])
+  let mutations = scan_source("b.mbt", source, config)
+  inspect(mutations.length(), content="1")
+  let bytes = @utf8.encode(source)
+  for mutation in mutations {
+    inspect(
+      @utf8.decode(bytes[mutation.start:mutation.end]),
+      content=mutation.original,
+    )
+  }
+  let mut relaxed : Mutation? = None
+  for mutation in mutations {
+    if mutation.replacement == "<=" {
+      relaxed = Some(mutation)
+    }
+  }
+  let mutation = relaxed.unwrap()
+  // The operator widens by one byte; the non-ASCII comment line above it
+  // survives byte-for-byte.
+  let applied = apply_mutation(source, mutation)
+  inspect(applied.contains("x <= 10 }\r\n"), content="true")
+  inspect(
+    applied.contains("// 境界値の比較: 10 以下と 10 以上\r\n"),
+    content="true",
+  )
+  inspect(applied.length(), content="\{source.length() + 1}")
+}
+
+///|
+test "skipped blocks and disabled boundary stay free of boundary mutants" {
+  let source =
+    #|#turtles.skip
+    #|fn skipped(x : Int) -> Bool { x < 10 }
+    #|fn active(x : Int) -> Bool { x < 10 }
+  let mutations = scan_source("b.mbt", source, operators_config(["boundary"]))
+  inspect(mutations.length(), content="1")
+  inspect(mutations[0].line, content="3")
+  inspect(mutations[0].replacement, content="<=")
 }
 
 ///|
