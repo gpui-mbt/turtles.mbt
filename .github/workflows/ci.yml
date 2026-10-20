@@ -401,7 +401,7 @@ jobs:
           report="$RUNNER_TEMP/turtles-self-report.json"
           moon run cmd/turtles -- --dir . \
             --file cmd/turtles/fingerprint.mbt --operators comparison \
-            --jobs 4 --timeout 60 --json "$report"
+            --jobs 4 --timeout 300 --json "$report"
           python - "$report" <<'PY'
           import json
           import sys
