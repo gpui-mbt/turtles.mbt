@@ -4,7 +4,12 @@
 
 ### Added
 
+- Opt-in `boundary` operator group: `< -> <=`, `> -> >=`, `<= -> <`, and `>= -> >` mutants that only differ at the equality point. Enable it with `--operators boundary` or `operators = ["boundary"]` in `turtles.toml`; `comparison,boundary` generates both edits at each comparison. Reports keep `group: "boundary"`, and `--iterate` only reuses boundary rows whose identity matches.
+- `fixtures/boundary` plus `scripts/verify-boundary.mbtx`, exercised in CI, pin the group's observable behavior: a default run emits no boundary row.
+
 ### Changed
+
+- An unset operator list now resolves through an exhaustive `operator_group_default_enabled`, so a new group is opt-in by explicit decision instead of by falling through a "not `Body`" test. Behavior is unchanged: `comparison`, `boolean`, `arithmetic`, `literal`, and `condition` run by default.
 
 ### Fixed
 

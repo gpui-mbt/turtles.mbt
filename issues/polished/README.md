@@ -1,6 +1,7 @@
 # Polished implementation tasks
 
 状態: 2026-10-13、PR #41の4件を `open` から `polished` へ移動。
+2026-10-20、境界値変異は実装・検証済みとして [closed](../closed/20261013-comparison-boundary-mutations.md) へ移動し、残り3件がここに残る。
 仕様と検証計画は実装着手可能。機能の実装・テスト完了を示す状態ではない。
 source基点は [6f5e06a](https://github.com/gpui-mbt/turtles.mbt/commit/6f5e06a70e7de1b49a3249f1d91a98e5f0f7e2b2)
 （turtles 0.4.6）。PRの初期HEADは `6dffe4e07822910e48b441cfc4359508104245f2`。
@@ -9,12 +10,13 @@ source基点は [6f5e06a](https://github.com/gpui-mbt/turtles.mbt/commit/6f5e06a
 
 | 優先度 | タスク | 確定した中心契約 | 着手条件 |
 | --- | --- | --- | --- |
-| P1 | [境界値変異](20261013-comparison-boundary-mutations.md) | 4変異、オプトイン、既存ID/順序維持 | 独立 |
+| — | [境界値変異](../closed/20261013-comparison-boundary-mutations.md)（実装済み） | 4変異、オプトイン、既存ID/順序維持 | 完了 |
 | P1 | [差分限定選択](20261013-diff-aware-mutation-selection.md) | new側照合、byte交差、schema 4、subset表示 | 独立。共通selection変更を調整 |
 | P1 | [永続診断](20261013-persistent-run-diagnostics.md) | phase証拠、保存上限、lifecycle、出力claim | 独立。ownership/生成物除外を先に実装 |
 | P2 | [CI sharding](20261013-deterministic-ci-sharding.md) | round-robin-v1、全identity manifest、部分gate | pure helperは着手可。runner統合はownership完成後 |
 
-1. boundaryとdiffはそれぞれ着手できる。diagnosticsは出力所有権/除外とログ保持を分けて実装する。
+1. diffは独立して着手できる。diagnosticsは出力所有権/除外とログ保持を分けて実装する。
+   schema 4への移行は、境界値変異がschema 3を維持したため未着手（diffまたはdiagnosticsが最初に導入する）。
 2. shardingはdiagnosticsのownership helperを利用する。`--retain-logs` の有効化は要求しない。
 3. diffはshardingの必須先行依存ではないが、両方が存在する版では組合せテストが必須。
 4. source変更前にcurrent mainと関連PRを再確認する。設計判断を覆す変更があれば該当issueをopenへ戻し理由を記録する。
@@ -42,13 +44,13 @@ iteration、timeouts、performance、shardingを参考に、MoonBit向けに対�
 
 | 領域 | 調査基点のturtles | 今回の判断 |
 | --- | --- | --- |
-| AST、Boolean/arithmetic/comparison | 実装済み | opt-in boundaryだけ追加 |
+| AST、Boolean/arithmetic/comparison | 実装済み | opt-in boundaryを追加（実装済み） |
 | body置換・skip annotation | 実装済み。bodyはopt-in | 基本機能を再提案しない |
 | jobs・warm workspace・baseline | 実装済み | isolation/順序を維持 |
 | target・affected | 実装済み | Moonのplanを独自推定で置換しない |
 | iterate・adaptive timeout | 実装済み | 全入力reuse guardを維持 |
 | JSON、ID、survivor diff、kill attribution、PBT | 実装済み | reportを重複新設せず診断証拠を追加 |
-| 変更行限定・独立runner分割・永続phase logs | 対応CLIなし | 本4件の追加対象 |
+| 変更行限定・独立runner分割・永続phase logs | 対応CLIなし | diff/diagnostics/shardingの追加対象（boundaryは実装済み） |
 | Rust固有Cargo/nextest/Default | MoonBit APIではない | そのまま移植しない |
 | in-place・baseline bypass | 今回の対象外 | pristine oracleを弱めない |
 | JUnit、context表示、既定test scope変更 | follow-up候補 | 今回の暗黙の実装対象にしない |

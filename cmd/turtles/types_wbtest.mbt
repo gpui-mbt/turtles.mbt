@@ -55,6 +55,38 @@ test "operator group names stay stable for reports" {
   inspect(operator_group_name(Arithmetic), content="arithmetic")
   inspect(operator_group_name(Literal), content="literal")
   inspect(operator_group_name(Condition), content="condition")
+  inspect(operator_group_name(Boundary), content="boundary")
+}
+
+///|
+test "an unset operator list enables the five core groups only" {
+  let config = default_project_config()
+  inspect(config.operator_enabled(Comparison), content="true")
+  inspect(config.operator_enabled(Boolean), content="true")
+  inspect(config.operator_enabled(Arithmetic), content="true")
+  inspect(config.operator_enabled(Literal), content="true")
+  inspect(config.operator_enabled(Condition), content="true")
+  inspect(config.operator_enabled(Body), content="false")
+  inspect(config.operator_enabled(Boundary), content="false")
+}
+
+///|
+test "boundary is enabled only when named explicitly" {
+  let config = ProjectConfig::{
+    include_patterns: [],
+    exclude_patterns: [],
+    operators: Some([Boundary]),
+  }
+  inspect(config.operator_enabled(Boundary), content="true")
+  inspect(config.operator_enabled(Comparison), content="false")
+  let both = ProjectConfig::{
+    include_patterns: [],
+    exclude_patterns: [],
+    operators: Some([Comparison, Boundary]),
+  }
+  inspect(both.operator_enabled(Comparison), content="true")
+  inspect(both.operator_enabled(Boundary), content="true")
+  inspect(both.operator_enabled(Arithmetic), content="false")
 }
 
 ///|

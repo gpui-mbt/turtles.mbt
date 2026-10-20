@@ -64,6 +64,15 @@ fails the assertions. This E2E uses only MoonBit and POSIX shell, not Python.
 Run `moon test scripts/self_report.mbtx` to test the standalone MoonBit report
 validator independently.
 
+The opt-in `boundary` group has its own binary check. `fixtures/boundary`
+declares four comparisons: two are tested strictly around the threshold and
+two exactly at it, so under `--operators boundary` the equality-only mutants of
+the first pair survive and the second pair are killed. CI runs the fixture's
+own tests, the default run (four comparison rows, no boundary row), the
+boundary-only run (exit `1`, validated by `scripts/verify-boundary.mbtx`), and
+a `comparison,boundary` run (both edits at every position), then tests the
+validator with `moon test scripts/verify-boundary.mbtx`.
+
 The checkout-free consumer matrix tests published 0.4.7 through both Mooncakes
 and native assets on Linux, macOS Apple Silicon, and Windows. Each consumer
 fixture starts without a build cache, with Python commands blocked. The

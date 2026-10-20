@@ -181,6 +181,22 @@ async test "write_json_report emits schema-3 JSON" {
 }
 
 ///|
+test "boundary mutants report their group and stay distinct from comparison" {
+  let base = report_test_mutation("m.mbt")
+  let comparison = { ..base, original: "<", replacement: ">", }
+  let boundary = { ..base, group: Boundary, original: "<", replacement: "<=", }
+  let json = Json([
+    json_mutation({ ..report_test_result(Killed), mutation: boundary, }),
+  ]).stringify()
+  // Single-row stringify is compact: fields keep their JSON names and the
+  // boundary group name is what --iterate reads back.
+  assert_true(json.contains("\"group\":\"boundary\""))
+  assert_true(json.contains("\"original\":\"<\""))
+  assert_true(json.contains("\"replacement\":\"<=\""))
+  assert_true(mutation_id(boundary) != mutation_id(comparison))
+}
+
+///|
 test "inactive_files are deduplicated and sorted" {
   let inactive = [
     mk_mutation("z.mbt", 0, 1, "+", "-"),

@@ -1,9 +1,9 @@
 # 比較演算子の境界値変異をオプトインで追加する
 
-Status: polished
+Status: closed (implemented 2026-10-20)
 Model: GPT-6 Astra Pro
 Created: 2026-10-13
-Updated: 2026-10-13
+Updated: 2026-10-20
 Branch: feat/comparison-boundary-mutations
 Priority: P1
 Type: implementation
@@ -139,5 +139,64 @@ fixtureのSURVIVEDを意図したCLI終了1は、期待値との一致をもっ�
 ## 注記
 
 実装を妨げる未解決事項なし。他3件の実装を待たず着手できる。
-[共通索引](README.md)のMoonBit規約を適用するが、上記仕様はこのファイル単独で実装判断できる。
+[共通索引](../polished/README.md)のMoonBit規約を適用するが、上記仕様はこのファイル単独で実装判断できる。
 `issues/open/20261013-comparison-boundary-mutations.md` から移動。完了時は実行証拠を追記して `issues/closed/` へ移す。
+
+## 実装記録 (2026-10-20)
+
+branch `feat/comparison-boundary-mutations`、基点 `ce66494`（v0.4.7）。
+仕様からの逸脱なし。report schema 3 のまま、`--iterate` の条件も変更していない。
+
+### 実装
+
+| ファイル | 変更 |
+| --- | --- |
+| `cmd/turtles/types.mbt` | `OperatorGroup::Boundary`、`"boundary"` の解析（別名なし）、`operator_group_name`、`operator_group_default_enabled` による既定集合の明示化（`None => group != Body` を廃止） |
+| `cmd/turtles/scanner.mbt` | `operator_specs()` 末尾へ境界値4件を追加（既存14件の順序は不変）、`record_operator` の `break` を削除して一対多生成へ |
+| `cmd/turtles/config.mbt` | `--operators` のhelpを `body and boundary are opt-in` に更新 |
+| `fixtures/boundary/` | `below`/`above`（前後値のみ検証）と `at_most`/`at_least`（等値を検証） |
+| `scripts/verify-boundary.mbtx` | 境界値レポートの検証と、その自己テスト |
+| `.github/workflows/ci.yml` | fixture baseline、既定/boundary/comparison+boundary の3実行、validator |
+| `README.md`、`docs/verification.md`、`CHANGELOG.md` | グループ説明・検証手順・Unreleased |
+
+### 実行証拠
+
+moon 0.1.20261012。サンドボックスでは `~/.moon` が読み取り専用のため、
+`MOON_HOME` にワークスペース内で完結する複製を指定して実行した。
+
+```text
+moon fmt --check                                    PASS
+moon fmt scripts/verify-boundary.mbtx --check       PASS
+moon check --target native --deny-warn              PASS
+moon test --target native                           203 tests / 0 failed (PASS)
+moon test scripts/self_report.mbtx                  3 tests / 0 failed (PASS)
+moon test scripts/verify-boundary.mbtx              4 tests / 0 failed (PASS)
+moon -C fixtures/basic test                         5 tests / 0 failed (PASS)
+moon -C fixtures/boundary test                      4 tests / 0 failed (PASS)
+sh scripts/self_e2e.sh                              PASS (fixture sweep 2回)
+```
+
+期待survivorによるCLI終了1は期待値と照合済み。
+
+| 実行 | 結果 |
+| --- | --- |
+| `--dir fixtures/basic`（既定） | 6 mutants 全KILLED、exit 0（既存E2Eと一致） |
+| `--dir fixtures/boundary`（既定） | comparison 4件、全KILLED、`group` は `comparison` のみ、exit 0 |
+| `--dir fixtures/boundary --operators boundary` | boundary 4件、`<→<=` SURVIVED、`<=→<` KILLED、`>→>=` SURVIVED、`>=→>` KILLED（2/2、score 50）、exit 1。`scripts/verify-boundary.mbtx` PASS |
+| 同 `--operators comparison,boundary` | 8件、各位置で comparison が先、`killed 6 / survived 2`、exit 1 |
+
+validatorは `group` を `comparison` に改変したレポートを終了1で拒否することを確認した。
+
+### 等値テスト追加による全KILLEDの確認
+
+一時コピーの `comparisons_test.mbt` を `below(10)`/`above(10)` も含む形に置き換え、同じ
+`--operators boundary` を実行した。結果は schema 3・4件すべてKILLED
+（killed 4 / survived 0 / timeout 0 / unviable 0 / score 100、exit 0）で、
+`<→<=` と `>→>=` が `below includes the threshold comparison`、
+`above includes the threshold comparison` によって検出された。
+恒久fixtureは2 KILLED / 2 SURVIVEDの混合のまま残し、両方の分岐をCIで常時観測する。
+
+### 未完了
+
+- CI（GitHub Actions）での実行結果はローカルcommit時点では未取得。PRのチェックで確認する。
+- バージョン更新はリリース手順で行う（この変更では `moon.mod` / `turtles_version` を0.4.7のまま維持）。

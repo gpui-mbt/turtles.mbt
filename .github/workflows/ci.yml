@@ -43,6 +43,8 @@ jobs:
         run: moon -C fixtures/isolation test
       - name: Run empty fixture baseline
         run: moon -C fixtures/empty test
+      - name: Run boundary fixture baseline
+        run: moon -C fixtures/boundary test
       - name: Run turtles against fixture
         run: |
           report="$RUNNER_TEMP/turtles-report.json"
@@ -67,6 +69,70 @@ jobs:
           assert report["summary"]["survived"] == 0
           assert report["summary"]["timeout"] == 0
           assert all("duration_ms" in mutant for mutant in report["mutants"])
+          PY
+      - name: Boundary group is opt-in and classifies equality-only mutants
+        run: |
+          # The default run stays unchanged: it never emits a boundary row.
+          # Only comparison inversions are generated; comparisons.mbt has
+          # four of them and the fixture tests kill all four.
+          default_report="$RUNNER_TEMP/turtles-boundary-default.json"
+          moon run cmd/turtles -- --dir fixtures/boundary --timeout 60 \
+            --json "$default_report"
+          python - "$default_report" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              report = json.load(handle)
+
+          assert report["schema"] == 3
+          assert len(report["mutants"]) == 4
+          assert {m["group"] for m in report["mutants"]} == {"comparison"}
+          assert report["summary"]["killed"] == 4
+          PY
+          # --operators boundary generates only the four equality-only
+          # mutants; the two the tests do not check survive, so exit is 1.
+          boundary_out="$RUNNER_TEMP/turtles-boundary-out"
+          report="$RUNNER_TEMP/turtles-boundary-report.json"
+          status=0
+          moon run cmd/turtles -- --dir fixtures/boundary --operators boundary \
+            --timeout 60 --output-dir "$boundary_out" --json "$report" \
+            || status=$?
+          test "$status" -eq 1
+          moon run scripts/verify-boundary.mbtx -- "$report"
+          # comparison,boundary generates both edits at every position: the
+          # four comparison inversions are all killed, and the same two
+          # boundary mutants survive as in the boundary-only run.
+          combined="$RUNNER_TEMP/turtles-boundary-combined.json"
+          status=0
+          moon run cmd/turtles -- --dir fixtures/boundary \
+            --operators comparison,boundary --timeout 60 \
+            --output-dir "$RUNNER_TEMP/turtles-boundary-combined-out" \
+            --json "$combined" || status=$?
+          test "$status" -eq 1
+          python - "$combined" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              report = json.load(handle)
+
+          rows = [(m["line"], m["group"], m["outcome"]) for m in report["mutants"]]
+          assert len(rows) == 8, rows
+          # At each position the comparison mutant comes first.
+          for i in range(0, 8, 2):
+              assert rows[i][1] == "comparison", rows
+              assert rows[i + 1][1] == "boundary", rows
+              assert rows[i][0] == rows[i + 1][0], rows
+          boundary = [row for row in rows if row[1] == "boundary"]
+          assert [row[2] for row in boundary] == [
+              "SURVIVED",
+              "KILLED",
+              "SURVIVED",
+              "KILLED",
+          ], boundary
+          assert report["summary"]["killed"] == 6, report["summary"]
+          assert report["summary"]["survived"] == 2, report["summary"]
           PY
       - name: Verify GNU timeout classification and iteration
         run: python3 scripts/timeout_smoke.py
@@ -449,9 +515,13 @@ jobs:
       - name: Update MoonBit registry
         run: moon update
       - name: Check standalone MoonBit validator formatting
-        run: moon fmt scripts/self_report.mbtx --check
-      - name: Test standalone MoonBit validator
-        run: moon test scripts/self_report.mbtx
+        run: |
+          moon fmt scripts/self_report.mbtx --check
+          moon fmt scripts/verify-boundary.mbtx --check
+      - name: Test standalone MoonBit validators
+        run: |
+          moon test scripts/self_report.mbtx
+          moon test scripts/verify-boundary.mbtx
       - name: Run Python-free binary self-E2E
         shell: bash
         run: |
